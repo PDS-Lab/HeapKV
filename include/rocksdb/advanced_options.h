@@ -8,6 +8,7 @@
 
 #pragma once
 
+#include <cstdint>
 #include <memory>
 
 #include "rocksdb/cache.h"
@@ -1102,6 +1103,11 @@ struct AdvancedColumnFamilyOptions {
   // Default: 0 (no delay)
   // Dynamically changeable through the SetOptions() API.
   uint32_t bottommost_file_compaction_delay = 0;
+
+
+  bool enable_heapkv = false;
+  uint32_t min_heap_value_size = 900;
+  double heap_extent_allocatable_threshold = 0.3;
 
   // Create ColumnFamilyOptions with default values for all fields
   AdvancedColumnFamilyOptions();

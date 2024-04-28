@@ -90,6 +90,11 @@ struct ImmutableCFOptions {
   std::shared_ptr<Cache> blob_cache;
 
   bool persist_user_defined_timestamps;
+
+  // heapkv options
+  bool enable_heapkv;
+  uint32_t min_heap_value_size;
+  double heap_extent_allocatable_threshold;
 };
 
 struct ImmutableOptions : public ImmutableDBOptions, public ImmutableCFOptions {

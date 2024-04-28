@@ -423,6 +423,10 @@ Status CompactionOutputs::AddToOutput(
     return s;
   }
 
+  if(heap_value_garbage_collector_) {
+    s = heap_value_garbage_collector_->OutputKeyValue(key, value);
+  }
+
   const ParsedInternalKey& ikey = c_iter.ikey();
   s = current_output().meta.UpdateBoundaries(key, value, ikey.sequence,
                                              ikey.type);

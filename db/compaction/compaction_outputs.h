@@ -10,9 +10,11 @@
 
 #pragma once
 
+#include <memory>
 #include "db/blob/blob_garbage_meter.h"
 #include "db/compaction/compaction.h"
 #include "db/compaction/compaction_iterator.h"
+#include "db/heap/heap_garbage_collector.h"
 #include "db/internal_stats.h"
 #include "db/output_validator.h"
 
@@ -103,6 +105,22 @@ class CompactionOutputs {
     for (const auto& blob : blob_file_additions_) {
       stats_.bytes_written_blob += blob.GetTotalBlobBytes();
     }
+  }
+
+  heapkv::HeapGarbageCollector* CreateHeapValueGarbageCollector() {
+    assert(!is_penultimate_level_);
+    heap_value_garbage_collector_ =
+        std::make_unique<heapkv::HeapGarbageCollector>();
+    return heap_value_garbage_collector_.get();
+  }
+
+  heapkv::HeapGarbageCollector* GetHeapValueGarbageCollector() const {
+    if (is_penultimate_level_) {
+      // heapkv doesn't support per_key_placement yet
+      assert(heap_value_garbage_collector_ == nullptr);
+      return nullptr;
+    }
+    return heap_value_garbage_collector_.get();
   }
 
   // Finish the current output file
@@ -306,6 +324,7 @@ class CompactionOutputs {
   // BlobDB info
   std::vector<BlobFileAddition> blob_file_additions_;
   std::unique_ptr<BlobGarbageMeter> blob_garbage_meter_;
+  std::unique_ptr<heapkv::HeapGarbageCollector> heap_value_garbage_collector_;
 
   // Basic compaction output stats for this level's outputs
   InternalStats::CompactionOutputsStats stats_;

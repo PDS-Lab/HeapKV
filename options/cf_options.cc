@@ -961,7 +961,11 @@ ImmutableCFOptions::ImmutableCFOptions(const ColumnFamilyOptions& cf_options)
       sst_partitioner_factory(cf_options.sst_partitioner_factory),
       blob_cache(cf_options.blob_cache),
       persist_user_defined_timestamps(
-          cf_options.persist_user_defined_timestamps) {}
+          cf_options.persist_user_defined_timestamps),
+      enable_heapkv(cf_options.enable_heapkv),
+      min_heap_value_size(cf_options.min_heap_value_size),
+      heap_extent_allocatable_threshold(
+          cf_options.heap_extent_allocatable_threshold) {}
 
 ImmutableOptions::ImmutableOptions() : ImmutableOptions(Options()) {}
 
