@@ -27,6 +27,7 @@ enum class UringIoType : char {
   Write,
   Readv,
   Writev,
+  Fsync,
 };
 
 class UringIoEngine;
@@ -61,6 +62,10 @@ class UringCmdFuture {
 struct UringIoOptions {
   uint32_t flags_{0};
   bool submit_now_{true};
+  UringIoOptions() = default;
+  UringIoOptions(uint32_t flags) : flags_(flags) {}
+  UringIoOptions(uint32_t flags, bool submit_now)
+      : flags_(flags), submit_now_(submit_now) {}
 };
 
 // a thread unsafe io engine
@@ -113,6 +118,8 @@ class UringIoEngine {
     io_uring_queue_exit(&ring_);
   }
 
+  size_t inflight() const { return inflight_; }
+
   void PollCq(bool wait);
   auto OpenAt(const UringIoOptions opts, int dfd, const char* path, int flags,
               mode_t mode) -> std::unique_ptr<UringCmdFuture>;
@@ -128,6 +135,13 @@ class UringIoEngine {
              int iovcnt, off_t offset) -> std::unique_ptr<UringCmdFuture>;
   auto Writev(const UringIoOptions opts, int fd, const struct iovec* iov,
               int iovcnt, off_t offset) -> std::unique_ptr<UringCmdFuture>;
+  auto Fsync(const UringIoOptions opts, int fd, bool datasync)
+      -> std::unique_ptr<UringCmdFuture>;
+
+  auto RegisterFiles(const int* fds, uint32_t count) -> int {
+    return io_uring_register_files(&ring_, fds, count);
+  }
+  auto UnregisterFiles() -> int { return io_uring_unregister_files(&ring_); }
 
  private:
   UringCmdHandle* GetFreeHandle() {

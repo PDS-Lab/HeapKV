@@ -1,5 +1,7 @@
 #include "db/heap/bitmap_allocator.h"
 
+#include <cstdint>
+
 #include "db/heap/utils.h"
 
 namespace ROCKSDB_NAMESPACE {
@@ -40,12 +42,18 @@ void UnSetBitMap(uint8_t *bm, uint32_t off, uint32_t n) {
   }
 }
 
-BitMapAllocator::BitMapAllocator(uint16_t size, uint8_t *bm)
-    : size_(size), bm_(bm) {
-  free_list_.reserve(100);
+void BitMapAllocator::Init(uint16_t size, uint8_t *bm, bool empty_hint) {
+  Reset();
+  size_ = size;
+  bm_ = bm;
+
+  if (empty_hint) {
+    current_alloc_seg_ = Segment(0, size * 8);
+    return;
+  }
+
   uint32_t c = 0;
   int32_t s = -1;
-
   for (uint16_t i = 0; i < size_; i++) {
     uint8_t lz = LeadingZero(bm_[i]);
     uint8_t tz = TailingZero(bm_[i]);
@@ -98,6 +106,35 @@ int32_t BitMapAllocator::Alloc(uint32_t n) {
     total_free_bits_ -= n;
     return start;
   }
+}
+
+uint32_t BitMapAllocator::CalcApproximateFreeBits(uint8_t *bm, uint32_t size) {
+  uint32_t c = 0;
+  int32_t s = -1;
+  uint32_t total = 0;
+  for (uint16_t i = 0; i < size; i++) {
+    uint8_t lz = LeadingZero(bm[i]);
+    uint8_t tz = TailingZero(bm[i]);
+    if (s == -1) {
+      if (tz > 0) {
+        s = i * 8 + (8 - tz);
+        c = tz;
+      }
+      continue;
+    }
+    c += lz;
+    if (lz < 8) {
+      if (c >= 8) {
+        total += c;
+      }
+      s = tz > 0 ? i * 8 + (8 - tz) : -1;
+      c = tz;
+    }
+  }
+  if (s != -1 && c >= 8) {
+    total += c;
+  }
+  return total;
 }
 
 }  // namespace heapkv

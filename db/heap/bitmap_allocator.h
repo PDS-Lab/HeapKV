@@ -44,16 +44,26 @@ class BitMapAllocator {
   };
 
  private:
-  [[maybe_unused]] const uint16_t size_;  // size in bytes, less than 4KiB
+  uint16_t size_{0};  // size in bytes, less than 4KiB
   Segment current_alloc_seg_{};
   uint32_t total_free_bits_{0};
   // we might need to access raw data in priority queue in the future, so we use
   // vector with heap operations
   std::vector<Segment> free_list_;
-  uint8_t *bm_;
+  uint8_t *bm_{nullptr};
 
  public:
-  BitMapAllocator(uint16_t size, uint8_t *bm);
+  BitMapAllocator() = default;
+
+  void Reset() {
+    size_ = 0;
+    current_alloc_seg_ = Segment{};
+    total_free_bits_ = 0;
+    free_list_.clear();
+    bm_ = nullptr;
+  }
+
+  void Init(uint16_t size, uint8_t *bm, bool empty_hint = false);
 
   int32_t Alloc(uint32_t n);
 
@@ -63,6 +73,8 @@ class BitMapAllocator {
     return std::max(current_alloc_seg_.size(),
                     free_list_.empty() ? 0 : free_list_.front().size());
   }
+
+  static uint32_t CalcApproximateFreeBits(uint8_t *bm, uint32_t size);
 
  private:
   Segment PopHeap() {

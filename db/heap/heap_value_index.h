@@ -11,7 +11,6 @@ namespace ROCKSDB_NAMESPACE {
 namespace heapkv {
 
 class HeapValueIndex {
- public:
  private:
   ext_id_t extent_number_{0};
   uint16_t block_offset_{0};
@@ -23,6 +22,15 @@ class HeapValueIndex {
 
  public:
   HeapValueIndex() = default;
+  HeapValueIndex(ext_id_t extent_number, uint16_t block_offset,
+                 uint16_t block_cnt, uint32_t value_size,
+                 uint32_t value_checksum, CompressionType compression_type)
+      : extent_number_(extent_number),
+        block_offset_(block_offset),
+        block_cnt_(block_cnt),
+        value_size_(value_size),
+        value_checksum_(value_checksum),
+        compression_type_(compression_type) {}
   HeapValueIndex(const HeapValueIndex&) = default;
   HeapValueIndex& operator=(const HeapValueIndex&) = default;
 

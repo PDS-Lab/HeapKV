@@ -23,14 +23,23 @@ namespace heapkv {
 constexpr size_t kHeapFileBlockSize = 512;
 constexpr size_t kExtentHeaderSize = 4096;
 constexpr size_t kChecksumSize = sizeof(uint32_t);
-constexpr size_t kTotalFreeBits = 8 * (kExtentHeaderSize - kChecksumSize);
+constexpr size_t kBitmapSize = kExtentHeaderSize - kChecksumSize;
+constexpr size_t kTotalFreeBits = 8 * kBitmapSize;
 constexpr size_t kExtentSize =
     kExtentHeaderSize + kTotalFreeBits * kHeapFileBlockSize;
 
+using ext_id_t = uint32_t;
+constexpr ext_id_t InValidExtentId = std::numeric_limits<ext_id_t>::max();
+
+inline uint64_t ExtentHeaderOffset(ext_id_t extent_number) {
+  return extent_number * kExtentSize;
+}
+
 // Extent is the basic unit of storage in heapkv. It is a 4KiB page with a 4B
 // checksum at the beginning.
-struct ExtentBitmap {
+struct alignas(kExtentHeaderSize) ExtentBitmap {
   uint8_t data_[kExtentHeaderSize];
+  uint8_t *Bitmap() { return data_ + kChecksumSize; }
   uint32_t Checksum() const {
     return DecodeFixed32(reinterpret_cast<const char *>(data_));
   }
@@ -45,8 +54,6 @@ struct ExtentBitmap {
                                    kExtentHeaderSize - sizeof(uint32_t)));
   }
 };
-
-using ext_id_t = uint32_t;
 
 struct ExtentMetaData {
   // uint64_t heapfile_number_;
@@ -93,6 +100,9 @@ class ExtentManager {
     }
   }
 
+  auto heapfile() const -> const std::shared_ptr<HeapFile> & {
+    return heapfile_;
+  }
   // add a new extent to the heap file, this will lock the allocated new extent
   auto AllocNewExtent() -> std::optional<ext_id_t>;
   // find the first unlocked extent (sorted by free bits) and lock it. only
@@ -104,13 +114,41 @@ class ExtentManager {
   // wait until the extent is locked
   void LockExtent(ext_id_t extent_number);
   // unlock the extent, and update the free bits
-  void UnlockExtent(ext_id_t extent_number, uint32_t new_approximate_free_bits);
+  void UnlockExtent(ext_id_t extent_number, uint32_t new_approximate_free_bits,
+                    bool update_free_bits);
   // unlock the extents, and update the free bits
-  void UnlockExtents(const std::vector<ExtentMetaData> &extents);
+  void UnlockExtents(const std::vector<ExtentMetaData> &extents,
+                     bool update_free_bits);
 
  private:
   void UnlockExtentInternal(ext_id_t extent_number,
-                            uint32_t new_approximate_free_bits);
+                            uint32_t new_approximate_free_bits,
+                            bool update_free_bits);
+};
+
+class HeapFile {
+ private:
+  std::string filename_;
+  int fd_;
+  // currently, file_number_ is the same as column_family_id_
+  uint32_t file_number_;
+  uint32_t column_family_id_;
+  bool use_direct_io_;
+
+ public:
+  HeapFile(std::string filename, int fd, uint32_t file_number,
+           uint32_t column_family_id, bool use_direct_io)
+      : filename_(std::move(filename)),
+        fd_(fd),
+        file_number_(file_number),
+        column_family_id_(column_family_id),
+        use_direct_io_(use_direct_io) {}
+
+  auto filename() const -> const std::string & { return filename_; }
+  auto fd() const -> int { return fd_; }
+  auto file_number() const -> uint32_t { return file_number_; }
+  auto column_family_id() const -> uint32_t { return column_family_id_; }
+  auto use_direct_io() const -> bool { return use_direct_io_; }
 };
 
 }  // namespace heapkv

@@ -179,6 +179,21 @@ auto UringIoEngine::Writev(const UringIoOptions opts, int fd,
   return future;
 }
 
+auto UringIoEngine::Fsync(const UringIoOptions opts, int fd, bool datasync)
+    -> std::unique_ptr<UringCmdFuture> {
+  UringCmdHandle* handle = nullptr;
+  while (nullptr == (handle = GetFreeHandle())) {
+    PollCq(true);
+  }
+  auto future = std::make_unique<UringCmdFuture>(this);
+  handle->future = future.get();
+  handle->type = UringIoType::Fsync;
+  io_uring_sqe* sqe = io_uring_get_sqe(&ring_);
+  io_uring_prep_fsync(sqe, fd, datasync ? IORING_FSYNC_DATASYNC : 0);
+  SubmitIo(opts, handle, sqe);
+  return future;
+}
+
 auto GetThreadLocalIoEngine() -> UringIoEngine* {
   static thread_local std::unique_ptr<UringIoEngine> uring_io_engine{nullptr};
   if (uring_io_engine == nullptr) {

@@ -1,5 +1,3 @@
-#pragma once
-
 #include "db/heap/heap_garbage_collector.h"
 
 #include <algorithm>

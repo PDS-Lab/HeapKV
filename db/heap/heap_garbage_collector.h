@@ -1,13 +1,12 @@
 #pragma once
 
-#include <third-party/small_vector/small_vector.h>
-
 #include <vector>
 
 #include "db/heap/heap_file.h"
 #include "db/heap/heap_value_index.h"
 #include "rocksdb/rocksdb_namespace.h"
 #include "table/internal_iterator.h"
+#include "util/autovector.h"
 
 namespace ROCKSDB_NAMESPACE {
 namespace heapkv {
@@ -23,7 +22,7 @@ class HeapGarbageCollector {
 
  private:
   std::vector<GarbageBlocks> dropped_blocks_;
-  gch::small_vector<HeapValueIndex, 16> pending_hvi_;
+  autovector<HeapValueIndex, 16> pending_hvi_;
 
  public:
   Status InputKeyValue(const Slice& key, const Slice& value);

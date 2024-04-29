@@ -15,7 +15,7 @@ auto ExtentManager::AllocNewExtent() -> std::optional<ext_id_t> {
   ext_id_t new_ext_id = next_extent_num_++;
   extents_.emplace_back(ExtentMetaData{new_ext_id, kTotalFreeBits});
   sort_extents_.emplace(new_ext_id);
-  latch_.emplace(new_ext_id, decltype(latch_)::value_type());
+  latch_.emplace(new_ext_id, decltype(latch_)::mapped_type());
   return new_ext_id;
 }
 
@@ -29,7 +29,7 @@ auto ExtentManager::TryLockMostFreeExtent(double allocatable_threshold)
       if (latch_it != latch_.end()) {
         return std::nullopt;
       } else {
-        latch_.emplace(*it, decltype(latch_)::value_type());
+        latch_.emplace(*it, decltype(latch_)::mapped_type());
         return *it;
       }
     } else {
@@ -48,7 +48,7 @@ auto ExtentManager::TryLockExtent(ext_id_t extent_number) -> bool {
   if (latch_it != latch_.end()) {
     return false;
   } else {
-    latch_.emplace(extent_number, decltype(latch_)::value_type());
+    latch_.emplace(extent_number, decltype(latch_)::mapped_type());
     return true;
   }
 }
@@ -66,27 +66,32 @@ void ExtentManager::LockExtent(ext_id_t extent_number) {
       }
       // waker pop the cv from the latch
     } else {
-      latch_.emplace(extent_number, decltype(latch_)::value_type());
+      latch_.emplace(extent_number, decltype(latch_)::mapped_type());
       return;
     }
   }
 }
 
 void ExtentManager::UnlockExtent(ext_id_t extent_number,
-                                 uint32_t new_approximate_free_bits) {
+                                 uint32_t new_approximate_free_bits,
+                                 bool update_free_bits) {
   MutexLock l(&mu_);
-  UnlockExtentInternal(extent_number, new_approximate_free_bits);
+  UnlockExtentInternal(extent_number, new_approximate_free_bits,
+                       update_free_bits);
 }
 
-void ExtentManager::UnlockExtents(const std::vector<ExtentMetaData> &extents) {
+void ExtentManager::UnlockExtents(const std::vector<ExtentMetaData> &extents,
+                                  bool update_free_bits) {
   MutexLock l(&mu_);
   for (const auto &extent : extents) {
-    UnlockExtentInternal(extent.extent_number_, extent.approximate_free_bits_);
+    UnlockExtentInternal(extent.extent_number_, extent.approximate_free_bits_,
+                         update_free_bits);
   }
 }
 
 void ExtentManager::UnlockExtentInternal(ext_id_t extent_number,
-                                         uint32_t new_approximate_free_bits) {
+                                         uint32_t new_approximate_free_bits,
+                                         bool update_free_bits) {
   auto latch_it = latch_.find(extent_number);
   assert(latch_it != latch_.end());
   if (latch_it->second.empty()) {
@@ -97,9 +102,11 @@ void ExtentManager::UnlockExtentInternal(ext_id_t extent_number,
     pair.second->Signal();
     latch_it->second.pop_front();
   }
-  sort_extents_.erase(extent_number);
-  extents_[extent_number].approximate_free_bits_ = new_approximate_free_bits;
-  sort_extents_.insert(extent_number);
+  if (update_free_bits) {
+    sort_extents_.erase(extent_number);
+    extents_[extent_number].approximate_free_bits_ = new_approximate_free_bits;
+    sort_extents_.insert(extent_number);
+  }
 }
 
 }  // namespace heapkv
