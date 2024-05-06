@@ -11,8 +11,10 @@
 #include <unordered_map>
 #include <vector>
 
+#include "db/heap/io_engine.h"
 #include "port/port_posix.h"
 #include "rocksdb/rocksdb_namespace.h"
+#include "rocksdb/status.h"
 #include "util/coding_lean.h"
 #include "util/hash.h"
 #include "util/xxhash.h"
@@ -33,6 +35,12 @@ constexpr ext_id_t InValidExtentId = std::numeric_limits<ext_id_t>::max();
 
 inline uint64_t ExtentHeaderOffset(ext_id_t extent_number) {
   return extent_number * kExtentSize;
+}
+
+inline uint64_t ExtentDataOffset(ext_id_t extent_number,
+                                 uint16_t block_offset) {
+  return ExtentHeaderOffset(extent_number) + kExtentHeaderSize +
+         block_offset * kHeapFileBlockSize;
 }
 
 // Extent is the basic unit of storage in heapkv. It is a 4KiB page with a 4B
@@ -78,7 +86,7 @@ class ExtentManager {
   };
 
  private:
-  std::shared_ptr<HeapFile> heapfile_;
+  HeapFile *heap_file_;
   ext_id_t next_extent_num_{0};
   port::Mutex mu_;
   std::unordered_map<ext_id_t,
@@ -88,9 +96,9 @@ class ExtentManager {
   std::set<ext_id_t, ExtentComp> sort_extents_;
 
  public:
-  ExtentManager(std::shared_ptr<HeapFile> heapfile, ext_id_t next_extent_num,
+  ExtentManager(HeapFile *heapfile, ext_id_t next_extent_num,
                 std::vector<ExtentMetaData> &&extents)
-      : heapfile_(std::move(heapfile)),
+      : heap_file_(std::move(heapfile)),
         next_extent_num_(next_extent_num),
         extents_(std::move(extents)),
         sort_extents_(ExtentComp{extents_}) {
@@ -100,9 +108,8 @@ class ExtentManager {
     }
   }
 
-  auto heapfile() const -> const std::shared_ptr<HeapFile> & {
-    return heapfile_;
-  }
+  auto heap_file() const -> const HeapFile * { return heap_file_; }
+  auto heap_file() -> HeapFile * { return heap_file_; }
   // add a new extent to the heap file, this will lock the allocated new extent
   auto AllocNewExtent() -> std::optional<ext_id_t>;
   // find the first unlocked extent (sorted by free bits) and lock it. only
@@ -149,6 +156,41 @@ class HeapFile {
   auto file_number() const -> uint32_t { return file_number_; }
   auto column_family_id() const -> uint32_t { return column_family_id_; }
   auto use_direct_io() const -> bool { return use_direct_io_; }
+
+  auto ReadExtentHeaderAsync(UringIoEngine *io_engine,
+                             const UringIoOptions &opts, ext_id_t extent_number,
+                             ExtentBitmap *bitmap, int fixed_fd_index = -1)
+      -> std::unique_ptr<UringCmdFuture>;
+  auto ReadExtentHeader(UringIoEngine *io_engine, const UringIoOptions &opts,
+                        ext_id_t extent_number, ExtentBitmap *bitmap,
+                        int fixed_fd_index = -1) -> Status;
+  auto WriteExtentHeaderAsync(
+      UringIoEngine *io_engine, const UringIoOptions &opts,
+      ext_id_t extent_number, const ExtentBitmap &bitmap,
+      int fixed_fd_index = -1) -> std::unique_ptr<UringCmdFuture>;
+  auto WriteExtentHeader(UringIoEngine *io_engine, const UringIoOptions &opts,
+                         ext_id_t extent_number, const ExtentBitmap &bitmap,
+                         int fixed_fd_index = -1) -> Status;
+  auto GetHeapValueAsync(UringIoEngine *io_engine, const UringIoOptions &opts,
+                         ext_id_t extent_number, uint16_t block_offset,
+                         uint16_t block_count, uint8_t *buffer,
+                         int fixed_fd_index = -1)
+      -> std::unique_ptr<UringCmdFuture>;
+  auto GetHeapValue(UringIoEngine *io_engine, const UringIoOptions &opts,
+                    ext_id_t extent_number, uint16_t block_offset,
+                    uint16_t block_count, uint8_t *buffer,
+                    int fixed_fd_index = -1) -> Status;
+  auto PutHeapValueAsync(UringIoEngine *io_engine, const UringIoOptions &opts,
+                         ext_id_t extent_number, uint16_t block_offset,
+                         uint16_t block_count, const uint8_t *buffer,
+                         int fixed_fd_index = -1)
+      -> std::unique_ptr<UringCmdFuture>;
+  auto PutHeapValue(UringIoEngine *io_engine, const UringIoOptions &opts,
+                    ext_id_t extent_number, uint16_t block_offset,
+                    uint16_t block_count, const uint8_t *buffer,
+                    int fixed_fd_index) -> Status;
+  auto Fsync(UringIoEngine *io_engine, const UringIoOptions &opts,
+             bool datasync, int fixed_fd_index = -1) -> Status;
 };
 
 }  // namespace heapkv

@@ -109,5 +109,118 @@ void ExtentManager::UnlockExtentInternal(ext_id_t extent_number,
   }
 }
 
+auto HeapFile::ReadExtentHeaderAsync(
+    UringIoEngine *io_engine, const UringIoOptions &opts,
+    ext_id_t extent_number, ExtentBitmap *bitmap,
+    int fixed_fd_index) -> std::unique_ptr<UringCmdFuture> {
+  assert(!opts.FixedFile() || fixed_fd_index >= 0);
+  return io_engine->Read(opts, opts.FixedFile() ? fixed_fd_index : fd(),
+                         bitmap->data_, kExtentHeaderSize,
+                         ExtentHeaderOffset(extent_number));
+}
+
+auto HeapFile::ReadExtentHeader(UringIoEngine *io_engine,
+                                const UringIoOptions &opts,
+                                ext_id_t extent_number, ExtentBitmap *bitmap,
+                                int fixed_fd_index) -> Status {
+  auto f = ReadExtentHeaderAsync(io_engine, opts, extent_number, bitmap,
+                                 fixed_fd_index);
+  f->Wait();
+  if (f->Result() < 0) {
+    return Status::IOError("read failed", strerror(-f->Result()));
+  } else if (!bitmap->VerifyChecksum()) {
+    return Status::Corruption("extent header checksum mismatch");
+  }
+  return Status::OK();
+}
+
+auto HeapFile::WriteExtentHeaderAsync(
+    UringIoEngine *io_engine, const UringIoOptions &opts,
+    ext_id_t extent_number, const ExtentBitmap &bitmap,
+    int fixed_fd_index) -> std::unique_ptr<UringCmdFuture> {
+  assert(!opts.FixedFile() || fixed_fd_index >= 0);
+  return io_engine->Write(opts, opts.FixedFile() ? fixed_fd_index : fd(),
+                          bitmap.data_, kExtentHeaderSize,
+                          ExtentHeaderOffset(extent_number));
+}
+
+auto HeapFile::WriteExtentHeader(UringIoEngine *io_engine,
+                                 const UringIoOptions &opts,
+                                 ext_id_t extent_number,
+                                 const ExtentBitmap &bitmap,
+                                 int fixed_fd_index) -> Status {
+  auto f = WriteExtentHeaderAsync(io_engine, opts, extent_number, bitmap,
+                                  fixed_fd_index);
+  f->Wait();
+  if (f->Result() < 0) {
+    return Status::IOError("write failed", strerror(-f->Result()));
+  }
+  return Status::OK();
+}
+
+auto HeapFile::GetHeapValueAsync(
+    UringIoEngine *io_engine, const UringIoOptions &opts,
+    ext_id_t extent_number, uint16_t block_offset, uint16_t block_count,
+    uint8_t *buffer, int fixed_fd_index) -> std::unique_ptr<UringCmdFuture> {
+  assert(!opts.FixedFile() || fixed_fd_index >= 0);
+  assert(!use_direct_io() ||
+         is_aligned(static_cast<uintptr_t>(buffer), kHeapFileBlockSize));
+  return io_engine->Read(opts, opts.FixedFile() ? fixed_fd_index : fd(), buffer,
+                         block_count * kHeapFileBlockSize,
+                         ExtentDataOffset(extent_number, block_offset));
+}
+
+auto HeapFile::GetHeapValue(UringIoEngine *io_engine,
+                            const UringIoOptions &opts, ext_id_t extent_number,
+                            uint16_t block_offset, uint16_t block_count,
+                            uint8_t *buffer, int fixed_fd_index) -> Status {
+  auto f = GetHeapValueAsync(io_engine, opts, extent_number, block_offset,
+                             block_count, buffer, fixed_fd_index);
+  f->Wait();
+  if (f->Result() < 0) {
+    return Status::IOError("read failed", strerror(-f->Result()));
+  }
+  return Status::OK();
+}
+
+auto HeapFile::PutHeapValueAsync(
+    UringIoEngine *io_engine, const UringIoOptions &opts,
+    ext_id_t extent_number, uint16_t block_offset, uint16_t block_count,
+    const uint8_t *buffer,
+    int fixed_fd_index) -> std::unique_ptr<UringCmdFuture> {
+  assert(!opts.FixedFile() || fixed_fd_index >= 0);
+  assert(!use_direct_io() ||
+         is_aligned(static_cast<uintptr_t>(buffer), kHeapFileBlockSize));
+  return io_engine->Write(opts, opts.FixedFile() ? fixed_fd_index : fd(),
+                          buffer, block_count * kHeapFileBlockSize,
+                          ExtentDataOffset(extent_number, block_offset));
+}
+
+auto HeapFile::PutHeapValue(UringIoEngine *io_engine,
+                            const UringIoOptions &opts, ext_id_t extent_number,
+                            uint16_t block_offset, uint16_t block_count,
+                            const uint8_t *buffer,
+                            int fixed_fd_index) -> Status {
+  auto f = PutHeapValueAsync(io_engine, opts, extent_number, block_offset,
+                             block_count, buffer, fixed_fd_index);
+  f->Wait();
+  if (f->Result() < 0) {
+    return Status::IOError("write failed", strerror(-f->Result()));
+  }
+  return Status::OK();
+}
+
+auto HeapFile::Fsync(UringIoEngine *io_engine, const UringIoOptions &opts,
+                     bool datasync, int fixed_fd_index) -> Status {
+  assert(!opts.FixedFile() || fixed_fd_index >= 0);
+  auto f = io_engine->Fsync(opts, opts.FixedFile() ? fixed_fd_index : fd(),
+                            datasync);
+  f->Wait();
+  if (f->Result() < 0) {
+    return Status::IOError("fsync failed", strerror(-f->Result()));
+  }
+  return Status::OK();
+}
+
 }  // namespace heapkv
 }  // namespace ROCKSDB_NAMESPACE

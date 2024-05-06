@@ -48,6 +48,9 @@ class InstrumentedMutexLock;
 struct SuperVersionContext;
 class BlobFileCache;
 class BlobSource;
+namespace heapkv {
+class CFHeapStorage;
+}
 
 extern const double kIncSlowdownRatio;
 // This file contains a list of data structures for managing column family
@@ -585,6 +588,7 @@ class ColumnFamilyData {
   std::unique_ptr<TableCache> table_cache_;
   std::unique_ptr<BlobFileCache> blob_file_cache_;
   std::unique_ptr<BlobSource> blob_source_;
+  std::unique_ptr<heapkv::CFHeapStorage> heap_storage_;
 
   std::unique_ptr<InternalStats> internal_stats_;
 

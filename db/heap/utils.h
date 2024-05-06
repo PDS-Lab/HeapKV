@@ -63,8 +63,8 @@ constexpr static inline bool is_aligned(uint64_t val, uint64_t align) {
 
 static inline auto futex(uint32_t *uaddr, int futex_op, uint32_t val,
                          const timespec *timeout = nullptr,
-                         uint32_t *uaddr2 = nullptr, uint32_t val3 = 0)
-    -> long {
+                         uint32_t *uaddr2 = nullptr,
+                         uint32_t val3 = 0) -> long {
   return syscall(SYS_futex, uaddr, futex_op, val, timeout, uaddr2, val3);
 }
 
@@ -74,8 +74,8 @@ static inline auto futex_wait(uint32_t *uaddr, uint32_t val, bool is_private,
                timeout);
 }
 
-static inline auto futex_wake(uint32_t *uaddr, uint32_t val, bool is_private)
-    -> long {
+static inline auto futex_wake(uint32_t *uaddr, uint32_t val,
+                              bool is_private) -> long {
   return futex(uaddr, is_private ? FUTEX_WAKE_PRIVATE : FUTEX_WAKE, val);
 }
 

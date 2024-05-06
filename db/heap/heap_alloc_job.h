@@ -1,5 +1,7 @@
 #pragma once
 
+#include <liburing/io_uring.h>
+
 #include <cstddef>
 #include <cstdint>
 #include <memory>
@@ -49,7 +51,8 @@ class HeapAllocJob {
   };
 
  private:
-  ColumnFamilyData* cfd_;
+  const uint64_t job_id_;
+  const ColumnFamilyData* cfd_;
   ExtentManager* ext_mgr_;
   UringIoEngine* io_engine_;
   int fd_;
@@ -65,11 +68,13 @@ class HeapAllocJob {
   std::unordered_set<ext_id_t> useless_exts_;
 
  public:
-  HeapAllocJob(ColumnFamilyData* cfd, ExtentManager* ext_mgr)
-      : cfd_(cfd),
+  HeapAllocJob(const uint64_t job_id, const ColumnFamilyData* cfd,
+               ExtentManager* ext_mgr)
+      : job_id_(job_id),
+        cfd_(cfd),
         ext_mgr_(ext_mgr),
         io_engine_(GetThreadLocalIoEngine()),
-        fd_(ext_mgr->heapfile()->fd()) {}
+        fd_(ext_mgr->heap_file()->fd()) {}
 
   ~HeapAllocJob();
 

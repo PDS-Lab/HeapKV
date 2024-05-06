@@ -7,6 +7,8 @@
 #include <cstring>
 #include <iostream>
 
+#include "port/likely.h"
+
 namespace ROCKSDB_NAMESPACE {
 namespace heapkv {
 
@@ -46,7 +48,7 @@ void UringIoEngine::SubmitIo(const UringIoOptions opts, UringCmdHandle* handle,
   int ret = 0;
   if (opts.submit_now_) {
     ret = io_uring_submit(&ring_);
-    if (ret < 0) {
+    if (UNLIKELY(ret < 0)) {
       std::cerr << "io_uring_submit failed: " << ret << " " << strerror(-ret)
                 << std::endl;
       handle->future->SetResult(ret, 0);
@@ -69,8 +71,8 @@ void UringIoEngine::ProcessCqe(io_uring_cqe* cqe, bool advance) {
 }
 
 auto UringIoEngine::OpenAt(const UringIoOptions opts, int dfd, const char* path,
-                           int flags, mode_t mode)
-    -> std::unique_ptr<UringCmdFuture> {
+                           int flags,
+                           mode_t mode) -> std::unique_ptr<UringCmdFuture> {
   UringCmdHandle* handle = nullptr;
   while (nullptr == (handle = GetFreeHandle())) {
     PollCq(true);
@@ -84,8 +86,8 @@ auto UringIoEngine::OpenAt(const UringIoOptions opts, int dfd, const char* path,
   return future;
 }
 
-auto UringIoEngine::Close(const UringIoOptions opts, int fd)
-    -> std::unique_ptr<UringCmdFuture> {
+auto UringIoEngine::Close(const UringIoOptions opts,
+                          int fd) -> std::unique_ptr<UringCmdFuture> {
   UringCmdHandle* handle = nullptr;
   while (nullptr == (handle = GetFreeHandle())) {
     PollCq(true);
@@ -100,8 +102,8 @@ auto UringIoEngine::Close(const UringIoOptions opts, int fd)
 }
 
 auto UringIoEngine::Fallocate(const UringIoOptions opts, int fd, int mode,
-                              off_t offset, off_t len)
-    -> std::unique_ptr<UringCmdFuture> {
+                              off_t offset,
+                              off_t len) -> std::unique_ptr<UringCmdFuture> {
   UringCmdHandle* handle = nullptr;
   while (nullptr == (handle = GetFreeHandle())) {
     PollCq(true);
@@ -116,8 +118,8 @@ auto UringIoEngine::Fallocate(const UringIoOptions opts, int fd, int mode,
 }
 
 auto UringIoEngine::Read(const UringIoOptions opts, int fd, void* buf,
-                         size_t count, off_t offset)
-    -> std::unique_ptr<UringCmdFuture> {
+                         size_t count,
+                         off_t offset) -> std::unique_ptr<UringCmdFuture> {
   UringCmdHandle* handle = nullptr;
   while (nullptr == (handle = GetFreeHandle())) {
     PollCq(true);
@@ -132,8 +134,8 @@ auto UringIoEngine::Read(const UringIoOptions opts, int fd, void* buf,
 }
 
 auto UringIoEngine::Write(const UringIoOptions opts, int fd, const void* buf,
-                          size_t count, off_t offset)
-    -> std::unique_ptr<UringCmdFuture> {
+                          size_t count,
+                          off_t offset) -> std::unique_ptr<UringCmdFuture> {
   UringCmdHandle* handle = nullptr;
   while (nullptr == (handle = GetFreeHandle())) {
     PollCq(true);
@@ -148,8 +150,8 @@ auto UringIoEngine::Write(const UringIoOptions opts, int fd, const void* buf,
 }
 
 auto UringIoEngine::Readv(const UringIoOptions opts, int fd,
-                          const struct iovec* iov, int iovcnt, off_t offset)
-    -> std::unique_ptr<UringCmdFuture> {
+                          const struct iovec* iov, int iovcnt,
+                          off_t offset) -> std::unique_ptr<UringCmdFuture> {
   UringCmdHandle* handle = nullptr;
   while (nullptr == (handle = GetFreeHandle())) {
     PollCq(true);
@@ -164,8 +166,8 @@ auto UringIoEngine::Readv(const UringIoOptions opts, int fd,
 }
 
 auto UringIoEngine::Writev(const UringIoOptions opts, int fd,
-                           const struct iovec* iov, int iovcnt, off_t offset)
-    -> std::unique_ptr<UringCmdFuture> {
+                           const struct iovec* iov, int iovcnt,
+                           off_t offset) -> std::unique_ptr<UringCmdFuture> {
   UringCmdHandle* handle = nullptr;
   while (nullptr == (handle = GetFreeHandle())) {
     PollCq(true);
@@ -179,8 +181,8 @@ auto UringIoEngine::Writev(const UringIoOptions opts, int fd,
   return future;
 }
 
-auto UringIoEngine::Fsync(const UringIoOptions opts, int fd, bool datasync)
-    -> std::unique_ptr<UringCmdFuture> {
+auto UringIoEngine::Fsync(const UringIoOptions opts, int fd,
+                          bool datasync) -> std::unique_ptr<UringCmdFuture> {
   UringCmdHandle* handle = nullptr;
   while (nullptr == (handle = GetFreeHandle())) {
     PollCq(true);

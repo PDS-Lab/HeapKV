@@ -14,6 +14,7 @@
 #include "db/heap/heap_value_index.h"
 #include "db/heap/io_engine.h"
 #include "db/heap/utils.h"
+#include "port/likely.h"
 #include "rocksdb/status.h"
 
 namespace ROCKSDB_NAMESPACE {
@@ -48,7 +49,7 @@ Status HeapAllocJob::InitJob() {
 Status HeapAllocJob::Add(const Slice& key, const Slice& value,
                          HeapValueIndex& hvi) {
   Status s;
-  if (ctx_.current_ext_id_ == InValidExtentId) {  // init
+  if (UNLIKELY(ctx_.current_ext_id_ == InValidExtentId)) {  // init
     s = GetNewFreeExtent();
     if (!s.ok()) {
       return s;
@@ -74,15 +75,14 @@ Status HeapAllocJob::Add(const Slice& key, const Slice& value,
                        static_cast<uint16_t>(need_block),
                        static_cast<uint32_t>(value.size()), checksum,
                        kNoCompression);
-  if (value.size() > kBufferSize) {
+  if (UNLIKELY(value.size() > kBufferSize)) {
     SubmitValueInBuffer();
     void* ptr = nullptr;
     posix_memalign(&ptr, 4096, aligned_value_size);
     memcpy(ptr, value.data(), value.size());
-    auto f = io_engine_->Write(
-        UringIoOptions(IOSQE_FIXED_FILE), 0, ptr, aligned_value_size,
-        ExtentHeaderOffset(ctx_.current_ext_id_) + kExtentHeaderSize +
-            offset * kHeapFileBlockSize);
+    auto f = ext_mgr_->heap_file()->PutHeapValueAsync(
+        io_engine_, UringIoOptions(IOSQE_FIXED_FILE), ctx_.current_ext_id_,
+        offset, need_block, static_cast<uint8_t*>(ptr), 0);
     IoReq req(std::move(f), reinterpret_cast<uint8_t*>(ptr), true);
     current_batch_.io_reqs_.emplace_back(std::move(req));
     return Status::OK();
@@ -139,9 +139,8 @@ Status HeapAllocJob::Finish(bool commit) {
         continue;
       }
       bitmap->GenerateChecksum();
-      auto f = io_engine_->Write(UringIoOptions(IOSQE_FIXED_FILE), 0,
-                                 reinterpret_cast<const void*>(bitmap.get()),
-                                 kExtentHeaderSize, ExtentHeaderOffset(ext_id));
+      auto f = ext_mgr_->heap_file()->WriteExtentHeaderAsync(
+          io_engine_, UringIoOptions(IOSQE_FIXED_FILE), ext_id, *bitmap, 0);
       futures.push_back(std::move(f));
     }
     for (auto& f : futures) {
@@ -153,11 +152,8 @@ Status HeapAllocJob::Finish(bool commit) {
   }
   // 3. fsync
   if (s.ok() && commit) {
-    auto f = io_engine_->Fsync(UringIoOptions(IOSQE_FIXED_FILE), 0, true);
-    f->Wait();
-    if (f->Result() < 0) {
-      s = Status::IOError("fsync failed", strerror(-f->Result()));
-    }
+    s = ext_mgr_->heap_file()->Fsync(io_engine_,
+                                     UringIoOptions(IOSQE_FIXED_FILE), true, 0);
   }
   // 4. unlock and update extents
   std::vector<ExtentMetaData> exts;
@@ -176,6 +172,7 @@ Status HeapAllocJob::Finish(bool commit) {
 }
 
 Status HeapAllocJob::GetNewFreeExtent() {
+  Status s;
   if (ctx_.current_ext_id_ != InValidExtentId && !ctx_.allocated_) {
     // this extent is useless for us
     useless_exts_.insert(ctx_.current_ext_id_);
@@ -188,18 +185,15 @@ Status HeapAllocJob::GetNewFreeExtent() {
     ctx_.base_bno_ = 0;
     ctx_.cnt_ = 0;
     auto bm = std::make_unique<ExtentBitmap>();
-    auto f = io_engine_->Read(
-        UringIoOptions(IOSQE_FIXED_FILE), 0, reinterpret_cast<void*>(bm.get()),
-        kExtentHeaderSize, ExtentHeaderOffset(ctx_.current_ext_id_));
-    f->Wait();
-    if (f->Result() < 0) {
-      return Status::IOError("read failed", strerror(-f->Result()));
-    } else if (!bm->VerifyChecksum()) {
-      return Status::Corruption("bitmap checksum failed");
+
+    s = ext_mgr_->heap_file()->ReadExtentHeader(
+        io_engine_, UringIoOptions(IOSQE_FIXED_FILE), ctx_.current_ext_id_,
+        bm.get(), 0);
+    if (s.ok()) {
+      allocator_.Init(kBitmapSize, bm->Bitmap());
+      locked_exts_.emplace(ctx_.current_ext_id_, std::move(bm));
     }
-    allocator_.Init(kBitmapSize, bm->Bitmap());
-    locked_exts_.emplace(ctx_.current_ext_id_, std::move(bm));
-    return Status::OK();
+    return s;
   }
   ext = ext_mgr_->AllocNewExtent();
   if (!ext.has_value()) {
@@ -212,17 +206,14 @@ Status HeapAllocJob::GetNewFreeExtent() {
   auto bm = std::make_unique<ExtentBitmap>();
   memset(bm->Bitmap(), 0, kBitmapSize);
   bm->GenerateChecksum();
-  auto f = io_engine_->Write(UringIoOptions(IOSQE_FIXED_FILE), 0,
-                             reinterpret_cast<const void*>(bm.get()),
-                             kExtentHeaderSize,
-                             ExtentHeaderOffset(ctx_.current_ext_id_));
-  f->Wait();
-  if (f->Result() < 0) {
-    return Status::IOError("write failed", strerror(-f->Result()));
+  s = ext_mgr_->heap_file()->WriteExtentHeader(io_engine_,
+                                               UringIoOptions(IOSQE_FIXED_FILE),
+                                               ctx_.current_ext_id_, *bm, 0);
+  if (s.ok()) {
+    allocator_.Init(kBitmapSize, bm->Bitmap(), true);
+    locked_exts_.emplace(ctx_.current_ext_id_, std::move(bm));
   }
-  allocator_.Init(kBitmapSize, bm->Bitmap(), true);
-  locked_exts_.emplace(ctx_.current_ext_id_, std::move(bm));
-  return Status::OK();
+  return s;
 }
 
 void HeapAllocJob::SubmitValueInBuffer() {
@@ -230,13 +221,9 @@ void HeapAllocJob::SubmitValueInBuffer() {
     return;
   }
   size_t off_in_buffer = buffer_offset_ - ctx_.cnt_ * kHeapFileBlockSize;
-  off_t off_in_file = ExtentHeaderOffset(ctx_.current_ext_id_) +
-                      kExtentHeaderSize + ctx_.base_bno_ * kHeapFileBlockSize;
-
-  auto f = io_engine_->Write(
-      UringIoOptions(IOSQE_FIXED_FILE), 0,
-      reinterpret_cast<const void*>(current_batch_.buffer_ + off_in_buffer),
-      ctx_.cnt_ * kHeapFileBlockSize, off_in_file);
+  auto f = ext_mgr_->heap_file()->PutHeapValueAsync(
+      io_engine_, UringIoOptions(IOSQE_FIXED_FILE), ctx_.current_ext_id_,
+      ctx_.base_bno_, ctx_.cnt_, current_batch_.buffer_ + off_in_buffer);
   IoReq req(std::move(f), current_batch_.buffer_ + off_in_buffer, false);
   current_batch_.io_reqs_.emplace_back(std::move(req));
   ctx_.base_bno_ = 0;
