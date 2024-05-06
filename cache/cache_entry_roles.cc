@@ -25,6 +25,7 @@ std::array<std::string, kNumCacheEntryRoles> kCacheEntryRoleToCamelString{{
     "FileMetadata",
     "BlobValue",
     "BlobCache",
+    "HeapValue",
     "Misc",
 }};
 
@@ -42,6 +43,7 @@ std::array<std::string, kNumCacheEntryRoles> kCacheEntryRoleToHyphenString{{
     "file-metadata",
     "blob-value",
     "blob-cache",
+    "heap-value",
     "misc",
 }};
 

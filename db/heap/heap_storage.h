@@ -1,10 +1,12 @@
 #pragma once
 
 #include <atomic>
-#include <cassert>
+#include <cstddef>
 #include <cstdint>
+#include <cstdlib>
 #include <memory>
 
+#include "cache/cache_helpers.h"
 #include "cache/cache_key.h"
 #include "db/column_family.h"
 #include "db/dbformat.h"
@@ -12,6 +14,7 @@
 #include "db/heap/heap_file.h"
 #include "db/heap/heap_value_index.h"
 #include "db/heap/io_engine.h"
+#include "memory/memory_allocator_impl.h"
 #include "rocksdb/advanced_cache.h"
 #include "rocksdb/options.h"
 #include "rocksdb/rocksdb_namespace.h"
@@ -48,6 +51,53 @@ class HeapValueCacheKey : private CacheKey {
   }
 };
 
+struct HeapValueCacheData {
+  CacheAllocationPtr allocation_;
+  size_t size_;
+  HeapValueCacheData(CacheAllocationPtr&& allocation, size_t size)
+      : allocation_(std::move(allocation)), size_(size) {}
+  // non copyable
+  HeapValueCacheData(const HeapValueCacheData&) = delete;
+  HeapValueCacheData& operator=(const HeapValueCacheData&) = delete;
+  HeapValueCacheData(HeapValueCacheData&&) = default;
+  HeapValueCacheData& operator=(HeapValueCacheData&&) = default;
+  ~HeapValueCacheData() = default;
+};
+
+class CFHeapStorage;
+
+class HeapValueGetContext {
+  friend class CFHeapStorage;
+
+ private:
+  SequenceNumber seq_;
+  HeapValueIndex hvi_;
+  // will be set if cache hit
+  CacheHandleGuard<HeapValueCacheData> cache_guard_;
+  std::unique_ptr<UringCmdFuture> future_;
+  std::unique_ptr<uint8_t[], decltype(std::free)*> buffer_;
+
+ public:
+  HeapValueGetContext(SequenceNumber seq, HeapValueIndex hvi,
+                      std::unique_ptr<UringCmdFuture> future,
+                      std::unique_ptr<uint8_t[], decltype(std::free)*> buffer)
+      : seq_(seq),
+        hvi_(hvi),
+        future_(std::move(future)),
+        buffer_(std::move(buffer)) {}
+  HeapValueGetContext(const HeapValueGetContext&) = delete;
+  HeapValueGetContext& operator=(const HeapValueGetContext&) = delete;
+  HeapValueGetContext(HeapValueGetContext&&) = default;
+  HeapValueGetContext& operator=(HeapValueGetContext&&) = default;
+  ~HeapValueGetContext() = default;
+  bool IsEmptyCtx() {
+    return future_ == nullptr && buffer_ == nullptr && cache_guard_.IsEmpty();
+  }
+  void SetCacheHandle(Cache* cache, Cache::Handle* handle) {
+    cache_guard_ = CacheHandleGuard<HeapValueCacheData>(cache, handle);
+  }
+};
+
 class CFHeapStorage {
  private:
   const ColumnFamilyData* cfd_;
@@ -77,13 +127,18 @@ class CFHeapStorage {
         extent_manager_.get());
   }
 
-  auto GetHeapValueAsync(const ReadOptions& ro, const ParsedInternalKey& ikey,
-                         const HeapValueIndex& hvi)
-      -> std::unique_ptr<UringCmdFuture>;
+  auto GetHeapValueAsync(const ReadOptions& ro, UringIoEngine* io_engine,
+                         const ParsedInternalKey& ikey,
+                         const HeapValueIndex& hvi) -> HeapValueGetContext;
+  auto GetHeapValue(const ReadOptions& ro, UringIoEngine* io_engine,
+                    const ParsedInternalKey& ikey, const HeapValueIndex& hvi,
+                    PinnableSlice* value) -> Status;
+  auto WaitAsyncGet(const ReadOptions& ro, HeapValueGetContext ctx,
+                    PinnableSlice* value) -> Status;
 
  private:
-  auto NewCacheKey(SequenceNumber seq,
-                   const HeapValueIndex& hvi) -> HeapValueCacheKey {
+  auto NewCacheKey(SequenceNumber seq, const HeapValueIndex& hvi)
+      -> HeapValueCacheKey {
     return HeapValueCacheKey(base_key_, seq, hvi);
   }
 };
