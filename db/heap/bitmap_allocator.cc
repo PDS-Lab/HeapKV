@@ -108,7 +108,8 @@ int32_t BitMapAllocator::Alloc(uint32_t n) {
   }
 }
 
-uint32_t BitMapAllocator::CalcApproximateFreeBits(uint8_t *bm, uint32_t size) {
+uint32_t BitMapAllocator::CalcApproximateFreeBits(const uint8_t *bm,
+                                                  uint32_t size) {
   uint32_t c = 0;
   int32_t s = -1;
   uint32_t total = 0;

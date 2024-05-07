@@ -5,11 +5,13 @@
 
 #pragma once
 
+#include <memory>
 #include <string>
 #include <vector>
 
 #include "db/dbformat.h"
 #include "options/db_options.h"
+#include "rocksdb/advanced_cache.h"
 #include "rocksdb/options.h"
 #include "util/compression.h"
 
@@ -88,6 +90,8 @@ struct ImmutableCFOptions {
   std::shared_ptr<SstPartitionerFactory> sst_partitioner_factory;
 
   std::shared_ptr<Cache> blob_cache;
+
+  std::shared_ptr<Cache> heap_value_cache;
 
   bool persist_user_defined_timestamps;
 

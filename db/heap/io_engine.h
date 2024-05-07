@@ -22,6 +22,7 @@ enum class UringIoType : char {
   UnInit,
   Open,
   Close,
+  Statx,
   Fallocate,
   Read,
   Write,
@@ -126,6 +127,9 @@ class UringIoEngine {
               mode_t mode) -> std::unique_ptr<UringCmdFuture>;
   auto Close(const UringIoOptions opts,
              int fd) -> std::unique_ptr<UringCmdFuture>;
+  auto Statx(const UringIoOptions opts, int dfd, const char* path, int flags,
+             unsigned mask, struct statx* statxbuf)
+      -> std::unique_ptr<UringCmdFuture>;
   auto Fallocate(const UringIoOptions opts, int fd, int mode, off_t offset,
                  off_t len) -> std::unique_ptr<UringCmdFuture>;
   auto Read(const UringIoOptions opts, int fd, void* buf, size_t count,

@@ -621,6 +621,17 @@ ColumnFamilyData::ColumnFamilyData(
     } else {
       ROCKS_LOG_INFO(ioptions_.logger, "\t(skipping printing options)\n");
     }
+
+    if (ioptions_.enable_heapkv) {
+      Status s = heapkv::CFHeapStorage::OpenOrCreate(
+          column_family_set->db_name_, this, &heap_storage_);
+      if (!s.ok()) {
+        ROCKS_LOG_ERROR(ioptions_.logger,
+                        "Failed to open heap storage for column family %s: %s",
+                        name.c_str(), s.ToString().c_str());
+        heap_storage_.reset();
+      }
+    }
   }
 
   RecalculateWriteStallConditions(mutable_cf_options_);
@@ -1697,7 +1708,7 @@ ColumnFamilyData* ColumnFamilySet::CreateColumnFamily(
     const std::string& name, uint32_t id, Version* dummy_versions,
     const ColumnFamilyOptions& options) {
   assert(column_families_.find(name) == column_families_.end());
-  // TODO(wnj): init heapfile and ext manger of this column family
+
   ColumnFamilyData* new_cfd = new ColumnFamilyData(
       id, name, dummy_versions, table_cache_, write_buffer_manager_, options,
       *db_options_, &file_options_, this, block_cache_tracer_, io_tracer_,

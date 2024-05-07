@@ -48,6 +48,7 @@ inline uint64_t ExtentDataOffset(ext_id_t extent_number,
 struct alignas(kExtentHeaderSize) ExtentBitmap {
   uint8_t data_[kExtentHeaderSize];
   uint8_t *Bitmap() { return data_ + kChecksumSize; }
+  const uint8_t *Bitmap() const { return data_ + kChecksumSize; }
   uint32_t Checksum() const {
     return DecodeFixed32(reinterpret_cast<const char *>(data_));
   }
@@ -157,6 +158,10 @@ class HeapFile {
   auto column_family_id() const -> uint32_t { return column_family_id_; }
   auto use_direct_io() const -> bool { return use_direct_io_; }
 
+  static auto Open(UringIoEngine *io_engine, const std::string &filename,
+                   uint32_t column_family_id, bool use_direct_io,
+                   std::unique_ptr<HeapFile> *file_handle) -> Status;
+  auto Stat(UringIoEngine *io_engine, struct statx *statxbuf) -> Status;
   auto ReadExtentHeaderAsync(UringIoEngine *io_engine,
                              const UringIoOptions &opts, ext_id_t extent_number,
                              ExtentBitmap *bitmap, int fixed_fd_index = -1)

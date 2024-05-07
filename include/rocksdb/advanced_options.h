@@ -1002,6 +1002,8 @@ struct AdvancedColumnFamilyOptions {
   // Default: nullptr (disabled)
   std::shared_ptr<Cache> blob_cache = nullptr;
 
+  std::shared_ptr<Cache> heap_value_cache = nullptr;
+
   // Enable/disable prepopulating the blob cache. When set to kFlushOnly, BlobDB
   // will insert newly written blobs into the blob cache during flush. This can
   // improve performance when reading back these blobs would otherwise be

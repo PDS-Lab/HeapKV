@@ -101,6 +101,22 @@ auto UringIoEngine::Close(const UringIoOptions opts,
   return future;
 }
 
+auto UringIoEngine::Statx(const UringIoOptions opts, int dfd, const char* path,
+                          int flags, unsigned mask, struct statx* statxbuf)
+    -> std::unique_ptr<UringCmdFuture> {
+  UringCmdHandle* handle = nullptr;
+  while (nullptr == (handle = GetFreeHandle())) {
+    PollCq(true);
+  }
+  auto future = std::make_unique<UringCmdFuture>(this);
+  handle->future = future.get();
+  handle->type = UringIoType::Statx;
+  io_uring_sqe* sqe = io_uring_get_sqe(&ring_);
+  io_uring_prep_statx(sqe, dfd, path, flags, mask, statxbuf);
+  SubmitIo(opts, handle, sqe);
+  return future;
+}
+
 auto UringIoEngine::Fallocate(const UringIoOptions opts, int fd, int mode,
                               off_t offset,
                               off_t len) -> std::unique_ptr<UringCmdFuture> {

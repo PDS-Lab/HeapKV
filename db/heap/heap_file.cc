@@ -4,7 +4,9 @@
 #include <cassert>
 #include <optional>
 
+#include "db/heap/io_engine.h"
 #include "port/port_posix.h"
+#include "rocksdb/status.h"
 #include "util/mutexlock.h"
 
 namespace ROCKSDB_NAMESPACE {
@@ -107,6 +109,35 @@ void ExtentManager::UnlockExtentInternal(ext_id_t extent_number,
     extents_[extent_number].approximate_free_bits_ = new_approximate_free_bits;
     sort_extents_.insert(extent_number);
   }
+}
+
+auto HeapFile::Open(UringIoEngine *io_engine, const std::string &filename,
+                    uint32_t column_family_id, bool use_direct_io,
+                    std::unique_ptr<HeapFile> *file_handle) -> Status {
+  int flag = O_RDWR | O_CREAT;
+  if (use_direct_io) {
+    flag |= O_DIRECT;
+  }
+  auto f = io_engine->OpenAt(UringIoOptions(), AT_FDCWD, filename.c_str(), flag,
+                             0644);
+  f->Wait();
+  if (f->Result() < 0) {
+    return Status::IOError("open failed", strerror(-f->Result()));
+  }
+  *file_handle = std::make_unique<HeapFile>(
+      filename, f->Result(), column_family_id, column_family_id, use_direct_io);
+  return Status::OK();
+}
+
+auto HeapFile::Stat(UringIoEngine *io_engine, struct statx *statxbuf)
+    -> Status {
+  auto f = io_engine->Statx(UringIoOptions(), fd_, "", AT_EMPTY_PATH,
+                            STATX_BASIC_STATS | STATX_DIOALIGN, statxbuf);
+  f->Wait();
+  if (f->Result() < 0) {
+    return Status::IOError("stat failed", strerror(-f->Result()));
+  }
+  return Status::OK();
 }
 
 auto HeapFile::ReadExtentHeaderAsync(

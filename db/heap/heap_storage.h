@@ -19,6 +19,7 @@
 #include "rocksdb/options.h"
 #include "rocksdb/rocksdb_namespace.h"
 #include "rocksdb/slice.h"
+#include "rocksdb/status.h"
 #include "rocksdb/types.h"
 
 namespace ROCKSDB_NAMESPACE {
@@ -120,6 +121,9 @@ class CFHeapStorage {
           CacheKey::CreateUniqueForCacheLifetime(heap_value_cache_.get());
     }
   }
+
+  static Status OpenOrCreate(const std::string& db_name, ColumnFamilyData* cfd,
+                             std::unique_ptr<CFHeapStorage>* storage_handle);
 
   auto NewAllocJob() -> std::unique_ptr<HeapAllocJob> {
     return std::make_unique<HeapAllocJob>(

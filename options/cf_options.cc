@@ -960,6 +960,7 @@ ImmutableCFOptions::ImmutableCFOptions(const ColumnFamilyOptions& cf_options)
       compaction_thread_limiter(cf_options.compaction_thread_limiter),
       sst_partitioner_factory(cf_options.sst_partitioner_factory),
       blob_cache(cf_options.blob_cache),
+      heap_value_cache(cf_options.heap_value_cache),
       persist_user_defined_timestamps(
           cf_options.persist_user_defined_timestamps),
       enable_heapkv(cf_options.enable_heapkv),

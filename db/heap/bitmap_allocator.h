@@ -74,7 +74,7 @@ class BitMapAllocator {
                     free_list_.empty() ? 0 : free_list_.front().size());
   }
 
-  static uint32_t CalcApproximateFreeBits(uint8_t *bm, uint32_t size);
+  static uint32_t CalcApproximateFreeBits(const uint8_t *bm, uint32_t size);
 
  private:
   Segment PopHeap() {

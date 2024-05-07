@@ -414,6 +414,11 @@ IOStatus Directories::SetDirectories(FileSystem* fs, const std::string& dbname,
     }
   }
   assert(data_dirs_.size() == data_paths.size());
+
+  io_s = DBImpl::CreateAndNewDirectory(fs, dbname + "/heapkv", &heap_dir_);
+  if (!io_s.ok()) {
+    return io_s;
+  }
   return IOStatus::OK();
 }
 

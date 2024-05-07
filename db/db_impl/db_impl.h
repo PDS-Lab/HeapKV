@@ -52,6 +52,7 @@
 #include "port/port.h"
 #include "rocksdb/db.h"
 #include "rocksdb/env.h"
+#include "rocksdb/file_system.h"
 #include "rocksdb/memtablerep.h"
 #include "rocksdb/status.h"
 #include "rocksdb/trace_reader_writer.h"
@@ -147,6 +148,15 @@ class Directories {
       }
     }
 
+    s.PermitUncheckedError();
+
+    if (heap_dir_) {
+      IOStatus temp_s = heap_dir_->Close(options, dbg);
+      if (!temp_s.ok() && !temp_s.IsNotSupported() && s.ok()) {
+        s = std::move(temp_s);
+      }
+    }
+
     // Ready for caller
     s.MustCheck();
     return s;
@@ -156,6 +166,7 @@ class Directories {
   std::unique_ptr<FSDirectory> db_dir_;
   std::vector<std::unique_ptr<FSDirectory>> data_dirs_;
   std::unique_ptr<FSDirectory> wal_dir_;
+  std::unique_ptr<FSDirectory> heap_dir_;
 };
 
 // While DB is the public interface of RocksDB, and DBImpl is the actual

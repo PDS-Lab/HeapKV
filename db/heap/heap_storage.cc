@@ -1,7 +1,13 @@
 #include "db/heap/heap_storage.h"
 
+#include <cstddef>
+#include <cstdint>
+#include <deque>
+#include <memory>
+
 #include "cache/cache_helpers.h"
 #include "cache/typed_cache.h"
+#include "db/heap/bitmap_allocator.h"
 #include "db/heap/heap_file.h"
 #include "db/heap/io_engine.h"
 #include "memory/memory_allocator_impl.h"
@@ -10,6 +16,80 @@
 
 namespace ROCKSDB_NAMESPACE {
 namespace heapkv {
+
+Status CFHeapStorage::OpenOrCreate(
+    const std::string& db_name, ColumnFamilyData* cfd,
+    std::unique_ptr<CFHeapStorage>* storage_handle) {
+  Status s;
+  UringIoEngine* io_engine = GetThreadLocalIoEngine();
+
+  char buf[100];
+  snprintf(buf, sizeof(buf), "%06llu.%s.%s",
+           static_cast<unsigned long long>(cfd->GetID()),
+           cfd->GetName().c_str(), "heap");
+  std::string heap_file_path = db_name + "/heapkv/" + buf;
+  std::unique_ptr<HeapFile> heap_file;
+  s = HeapFile::Open(io_engine, heap_file_path, cfd->GetID(),
+                     cfd->ioptions()->use_direct_io_for_flush_and_compaction ||
+                         cfd->ioptions()->use_direct_reads,
+                     &heap_file);
+  if (!s.ok()) {
+    return s;
+  }
+  //! TODO(wnj): use extent manifest to generate extent metadata
+  struct statx statxbuf;
+  s = heap_file->Stat(io_engine, &statxbuf);
+  if (!s.ok()) {
+    return s;
+  }
+  uint32_t num_exts = statxbuf.stx_size + kExtentSize - 1 / kExtentSize;
+  std::vector<ExtentMetaData> extents(num_exts);
+  std::deque<
+      std::pair<std::unique_ptr<ExtentBitmap>, std::unique_ptr<UringCmdFuture>>>
+      inflight;
+  size_t pos = 0;
+
+  auto update_fn = [&](bool end) {
+    while (!inflight.empty()) {
+      // peek
+      if (inflight.front().second->Done()) {
+        if (inflight.front().second->Result() < 0) {
+          s = Status::IOError("Failed to read extent header",
+                              strerror(-inflight.front().second->Result()));
+          return;
+        }
+        extents[pos].extent_number_ = pos;
+        extents[pos].approximate_free_bits_ =
+            BitMapAllocator::CalcApproximateFreeBits(
+                inflight.front().first->Bitmap(), kBitmapSize);
+        inflight.pop_front();
+        pos++;
+      } else if (end) {
+        inflight.front().second->Wait();
+      } else {
+        break;
+      }
+    }
+  };
+
+  for (uint32_t i = 0; i < num_exts; i++) {
+    auto bm = std::make_unique<ExtentBitmap>();
+    auto f = heap_file->ReadExtentHeaderAsync(io_engine, UringIoOptions(), i,
+                                              bm.get());
+    inflight.emplace_back(std::move(bm), std::move(f));
+    update_fn(false);
+  }
+  update_fn(true);
+  if (!s.ok()) {
+    return s;
+  }
+  auto ext_manager = std::make_unique<ExtentManager>(heap_file.get(), num_exts,
+                                                     std::move(extents));
+  *storage_handle = std::make_unique<CFHeapStorage>(
+      cfd, cfd->ioptions()->heap_value_cache, std::move(heap_file),
+      std::move(ext_manager));
+  return s;
+}
 
 auto CFHeapStorage::GetHeapValueAsync(const ReadOptions& ro,
                                       UringIoEngine* io_engine,
