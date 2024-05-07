@@ -1309,7 +1309,7 @@ void CompactionJob::ProcessKeyValueCompaction(SubcompactionState* sub_compact) {
       &existing_snapshots_, earliest_write_conflict_snapshot_, job_snapshot_seq,
       snapshot_checker_, env_, ShouldReportDetailedTime(env_, stats_),
       /*expect_valid_internal_key=*/true, range_del_agg.get(),
-      blob_file_builder.get(), db_options_.allow_data_in_errors,
+      blob_file_builder.get(), nullptr, db_options_.allow_data_in_errors,
       db_options_.enforce_single_del_contracts, manual_compaction_canceled_,
       sub_compact->compaction->DoesInputReferenceBlobFiles() ||
           sub_compact->compaction->immutable_options()

@@ -79,7 +79,7 @@ class HeapAllocJob {
   ~HeapAllocJob();
 
   Status InitJob();
-  Status Add(const Slice& key, const Slice& value, HeapValueIndex& hvi);
+  Status Add(const Slice& key, const Slice& value, HeapValueIndex* hvi);
   Status Finish(bool commit);
 
  private:

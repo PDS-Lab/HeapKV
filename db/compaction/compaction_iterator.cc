@@ -12,6 +12,7 @@
 #include "db/blob/blob_file_builder.h"
 #include "db/blob/blob_index.h"
 #include "db/blob/prefetch_buffer_collection.h"
+#include "db/heap/heap_value_index.h"
 #include "db/snapshot_checker.h"
 #include "db/wide/wide_column_serialization.h"
 #include "db/wide/wide_columns_helper.h"
@@ -29,8 +30,8 @@ CompactionIterator::CompactionIterator(
     SequenceNumber job_snapshot, const SnapshotChecker* snapshot_checker,
     Env* env, bool report_detailed_time, bool expect_valid_internal_key,
     CompactionRangeDelAggregator* range_del_agg,
-    BlobFileBuilder* blob_file_builder, bool allow_data_in_errors,
-    bool enforce_single_del_contracts,
+    BlobFileBuilder* blob_file_builder, heapkv::HeapAllocJob* heap_alloc_job,
+    bool allow_data_in_errors, bool enforce_single_del_contracts,
     const std::atomic<bool>& manual_compaction_canceled,
     bool must_count_input_entries, const Compaction* compaction,
     const CompactionFilter* compaction_filter,
@@ -43,8 +44,8 @@ CompactionIterator::CompactionIterator(
           input, cmp, merge_helper, last_sequence, snapshots,
           earliest_write_conflict_snapshot, job_snapshot, snapshot_checker, env,
           report_detailed_time, expect_valid_internal_key, range_del_agg,
-          blob_file_builder, allow_data_in_errors, enforce_single_del_contracts,
-          manual_compaction_canceled,
+          blob_file_builder, heap_alloc_job, allow_data_in_errors,
+          enforce_single_del_contracts, manual_compaction_canceled,
           std::unique_ptr<CompactionProxy>(
               compaction ? new RealCompaction(compaction) : nullptr),
           must_count_input_entries, compaction_filter, shutting_down, info_log,
@@ -58,8 +59,8 @@ CompactionIterator::CompactionIterator(
     SequenceNumber job_snapshot, const SnapshotChecker* snapshot_checker,
     Env* env, bool report_detailed_time, bool expect_valid_internal_key,
     CompactionRangeDelAggregator* range_del_agg,
-    BlobFileBuilder* blob_file_builder, bool allow_data_in_errors,
-    bool enforce_single_del_contracts,
+    BlobFileBuilder* blob_file_builder, heapkv::HeapAllocJob* heap_alloc_job,
+    bool allow_data_in_errors, bool enforce_single_del_contracts,
     const std::atomic<bool>& manual_compaction_canceled,
     std::unique_ptr<CompactionProxy> compaction, bool must_count_input_entries,
     const CompactionFilter* compaction_filter,
@@ -81,6 +82,7 @@ CompactionIterator::CompactionIterator(
       expect_valid_internal_key_(expect_valid_internal_key),
       range_del_agg_(range_del_agg),
       blob_file_builder_(blob_file_builder),
+      heap_alloc_job_(heap_alloc_job),
       compaction_(std::move(compaction)),
       compaction_filter_(compaction_filter),
       shutting_down_(shutting_down),
@@ -1091,12 +1093,29 @@ bool CompactionIterator::ExtractLargeValueIfNeededImpl() {
 void CompactionIterator::ExtractLargeValueIfNeeded() {
   assert(ikey_.type == kTypeValue);
 
-  if (!ExtractLargeValueIfNeededImpl()) {
-    return;
-  }
+  if (blob_file_builder_) {
+    if (!ExtractLargeValueIfNeededImpl()) {
+      return;
+    }
 
-  ikey_.type = kTypeBlobIndex;
-  current_key_.UpdateInternalKey(ikey_.sequence, ikey_.type);
+    ikey_.type = kTypeBlobIndex;
+    current_key_.UpdateInternalKey(ikey_.sequence, ikey_.type);
+  } else if (heap_alloc_job_ && value().size() >= compaction_->real_compaction()
+                                                      ->immutable_options()
+                                                      ->min_heap_value_size) {
+    heapkv::HeapValueIndex hvi;
+    const Status s = heap_alloc_job_->Add(key(), value(), &hvi);
+    if (!s.ok()) {
+      status_ = s;
+      validity_info_.Invalidate();
+      return;
+    }
+    heap_value_index_.clear();
+    hvi.EncodeTo(&heap_value_index_);
+    value_ = heap_value_index_;
+    ikey_.type = kTypeHeapValueIndex;
+    current_key_.UpdateInternalKey(ikey_.sequence, ikey_.type);
+  }
 }
 
 void CompactionIterator::GarbageCollectBlobIfNeeded() {

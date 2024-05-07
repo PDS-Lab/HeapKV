@@ -505,7 +505,7 @@ Status FlushJob::MemPurge() {
         earliest_write_conflict_snapshot_, job_snapshot_seq, snapshot_checker_,
         env, ShouldReportDetailedTime(env, ioptions->stats),
         true /* internal key corruption is not ok */, range_del_agg.get(),
-        nullptr, ioptions->allow_data_in_errors,
+        nullptr, nullptr, ioptions->allow_data_in_errors,
         ioptions->enforce_single_del_contracts,
         /*manual_compaction_canceled=*/kManualCompactionCanceledFalse,
         false /* must_count_input_entries */,

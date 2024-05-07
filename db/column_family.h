@@ -382,6 +382,7 @@ class ColumnFamilyData {
 
   TableCache* table_cache() const { return table_cache_.get(); }
   BlobSource* blob_source() const { return blob_source_.get(); }
+  heapkv::CFHeapStorage* heap_storage() const { return heap_storage_.get(); }
 
   // See documentation in compaction_picker.h
   // REQUIRES: DB mutex held

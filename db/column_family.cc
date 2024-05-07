@@ -23,6 +23,7 @@
 #include "db/compaction/compaction_picker_level.h"
 #include "db/compaction/compaction_picker_universal.h"
 #include "db/db_impl/db_impl.h"
+#include "db/heap/heap_storage.h"
 #include "db/internal_stats.h"
 #include "db/job_context.h"
 #include "db/range_del_aggregator.h"
