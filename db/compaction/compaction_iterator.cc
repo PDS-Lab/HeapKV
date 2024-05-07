@@ -1100,9 +1100,8 @@ void CompactionIterator::ExtractLargeValueIfNeeded() {
 
     ikey_.type = kTypeBlobIndex;
     current_key_.UpdateInternalKey(ikey_.sequence, ikey_.type);
-  } else if (heap_alloc_job_ && value().size() >= compaction_->real_compaction()
-                                                      ->immutable_options()
-                                                      ->min_heap_value_size) {
+  } else if (heap_alloc_job_ &&
+             value().size() >= heap_alloc_job_->min_heap_value_size()) {
     heapkv::HeapValueIndex hvi;
     const Status s = heap_alloc_job_->Add(key(), value(), &hvi);
     if (!s.ok()) {

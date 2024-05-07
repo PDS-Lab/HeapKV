@@ -42,7 +42,7 @@ Status CFHeapStorage::OpenOrCreate(
   if (!s.ok()) {
     return s;
   }
-  uint32_t num_exts = statxbuf.stx_size + kExtentSize - 1 / kExtentSize;
+  uint32_t num_exts = (statxbuf.stx_size + kExtentSize - 1) / kExtentSize;
   std::vector<ExtentMetaData> extents(num_exts);
   std::deque<
       std::pair<std::unique_ptr<ExtentBitmap>, std::unique_ptr<UringCmdFuture>>>

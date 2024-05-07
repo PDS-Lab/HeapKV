@@ -30,6 +30,7 @@ rocksdb.pc
 CMakeCache.txt
 CMakeFiles/
 build/
+build_debug/
 
 ldb
 manifest_dump

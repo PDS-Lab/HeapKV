@@ -205,6 +205,7 @@ Status BuildTable(
                            ->GetColumnFamily(tboptions.column_family_id)
                            ->heap_storage()
                            ->NewAllocJob();
+      s = heap_alloc_job->InitJob();
     }
 
     const std::atomic<bool> kManualCompactionCanceledFalse{false};
@@ -443,6 +444,12 @@ Status BuildTable(
         if (s.ok() && !output_validator.CompareValidator(file_validator)) {
           s = Status::Corruption("Paranoid checksums do not match");
         }
+      }
+    }
+    if (heap_alloc_job) {
+      Status ss = heap_alloc_job->Finish(s.ok());
+      if (s.ok()) {
+        s = ss;
       }
     }
   }

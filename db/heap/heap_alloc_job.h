@@ -78,6 +78,9 @@ class HeapAllocJob {
 
   ~HeapAllocJob();
 
+  uint32_t min_heap_value_size() const {
+    return cfd_->ioptions()->min_heap_value_size;
+  }
   Status InitJob();
   Status Add(const Slice& key, const Slice& value, HeapValueIndex* hvi);
   Status Finish(bool commit);

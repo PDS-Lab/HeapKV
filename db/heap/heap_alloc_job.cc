@@ -223,7 +223,7 @@ void HeapAllocJob::SubmitValueInBuffer() {
   size_t off_in_buffer = buffer_offset_ - ctx_.cnt_ * kHeapFileBlockSize;
   auto f = ext_mgr_->heap_file()->PutHeapValueAsync(
       io_engine_, UringIoOptions(IOSQE_FIXED_FILE), ctx_.current_ext_id_,
-      ctx_.base_bno_, ctx_.cnt_, current_batch_.buffer_ + off_in_buffer);
+      ctx_.base_bno_, ctx_.cnt_, current_batch_.buffer_ + off_in_buffer, 0);
   IoReq req(std::move(f), current_batch_.buffer_ + off_in_buffer, false);
   current_batch_.io_reqs_.emplace_back(std::move(req));
   ctx_.base_bno_ = 0;

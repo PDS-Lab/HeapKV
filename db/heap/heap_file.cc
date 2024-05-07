@@ -5,6 +5,7 @@
 #include <optional>
 
 #include "db/heap/io_engine.h"
+#include "db/heap/utils.h"
 #include "port/port_posix.h"
 #include "rocksdb/status.h"
 #include "util/mutexlock.h"
@@ -195,7 +196,7 @@ auto HeapFile::GetHeapValueAsync(
     uint8_t *buffer, int fixed_fd_index) -> std::unique_ptr<UringCmdFuture> {
   assert(!opts.FixedFile() || fixed_fd_index >= 0);
   assert(!use_direct_io() ||
-         is_aligned(static_cast<uintptr_t>(buffer), kHeapFileBlockSize));
+         is_aligned(reinterpret_cast<uint64_t>(buffer), kHeapFileBlockSize));
   return io_engine->Read(opts, opts.FixedFile() ? fixed_fd_index : fd(), buffer,
                          block_count * kHeapFileBlockSize,
                          ExtentDataOffset(extent_number, block_offset));
@@ -221,7 +222,7 @@ auto HeapFile::PutHeapValueAsync(
     int fixed_fd_index) -> std::unique_ptr<UringCmdFuture> {
   assert(!opts.FixedFile() || fixed_fd_index >= 0);
   assert(!use_direct_io() ||
-         is_aligned(static_cast<uintptr_t>(buffer), kHeapFileBlockSize));
+         is_aligned(reinterpret_cast<uint64_t>(buffer), kHeapFileBlockSize));
   return io_engine->Write(opts, opts.FixedFile() ? fixed_fd_index : fd(),
                           buffer, block_count * kHeapFileBlockSize,
                           ExtentDataOffset(extent_number, block_offset));
