@@ -53,6 +53,13 @@ Status HeapGarbageCollector::OutputKeyValue(const Slice& key,
 }
 
 auto HeapGarbageCollector::FinalizeDropResult() -> std::vector<GarbageBlocks> {
+  for (auto& p : pending_hvi_) {
+    dropped_blocks_.push_back(GarbageBlocks{
+        .extent_number_ = p.extent_number(),
+        .block_offset_ = p.block_offset(),
+        .block_cnt_ = p.block_cnt(),
+    });
+  }
   if (dropped_blocks_.empty()) {
     return {};
   }
