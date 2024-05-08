@@ -242,11 +242,17 @@ auto HeapFile::PutHeapValue(UringIoEngine *io_engine,
   return Status::OK();
 }
 
+auto HeapFile::FsyncAsync(UringIoEngine *io_engine, const UringIoOptions &opts,
+                          bool datasync, int fixed_fd_index)
+    -> std::unique_ptr<UringCmdFuture> {
+  assert(!opts.FixedFile() || fixed_fd_index >= 0);
+  return io_engine->Fsync(opts, opts.FixedFile() ? fixed_fd_index : fd(),
+                          datasync);
+}
+
 auto HeapFile::Fsync(UringIoEngine *io_engine, const UringIoOptions &opts,
                      bool datasync, int fixed_fd_index) -> Status {
-  assert(!opts.FixedFile() || fixed_fd_index >= 0);
-  auto f = io_engine->Fsync(opts, opts.FixedFile() ? fixed_fd_index : fd(),
-                            datasync);
+  auto f = FsyncAsync(io_engine, opts, datasync, fixed_fd_index);
   f->Wait();
   if (f->Result() < 0) {
     return Status::IOError("fsync failed", strerror(-f->Result()));

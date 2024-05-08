@@ -683,6 +683,7 @@ set(SOURCES
   db/heap/bitmap_allocator.cc
   db/heap/heap_alloc_job.cc
   db/heap/heap_file.cc
+  db/heap/heap_free_job.cc
   db/heap/heap_garbage_collector.cc
   db/heap/heap_storage.cc
   db/heap/io_engine.cc

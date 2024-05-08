@@ -1787,6 +1787,19 @@ Status CompactionJob::InstallCompactionResults(
         }
       }
     }
+    // TODO(wnj): handle free job
+    if (sub_compact.Current().GetHeapValueGarbageCollector()) {
+      auto res = sub_compact.Current()
+                     .GetHeapValueGarbageCollector()
+                     ->FinalizeDropResult();
+      // std::cout << "HeapValueGarbageCollector: ";
+      // for (auto& g : res) {
+      //   std::cout << "{" << g.extent_number_ << ", " << g.block_offset_ << ",
+      //   "
+      //             << g.block_cnt_ << "} ";
+      // }
+      // std::cout << std::endl;
+    }
   }
 
   for (const auto& pair : blob_total_garbage) {
