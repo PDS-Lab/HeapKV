@@ -12,6 +12,7 @@
 
 #include "db/db_impl/db_impl.h"
 #include "db/event_helpers.h"
+#include "db/heap/heap_storage.h"
 #include "db/memtable_list.h"
 #include "file/file_util.h"
 #include "file/filename.h"
@@ -394,6 +395,16 @@ void DBImpl::DeleteObsoleteFileImpl(int job_id, const std::string& fname,
     EventHelpers::LogAndNotifyTableFileDeletion(
         &event_logger_, job_id, number, fname, file_deletion_status, GetName(),
         immutable_db_options_.listeners);
+    // TODO(wnj): maybe use eventlistener and dont use db mutex.
+    mutex_.Lock();
+    auto cfs = versions_->GetColumnFamilySet();
+    for (auto cfd : *cfs) {
+      if (cfd->IsDropped()) {
+        continue;
+      }
+      cfd->heap_storage()->NotifyFileDeletion(number);
+    }
+    mutex_.Unlock();
   }
   if (type == kBlobFile) {
     EventHelpers::LogAndNotifyBlobFileDeletion(

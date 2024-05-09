@@ -28,6 +28,7 @@ class HeapGarbageCollector {
   Status InputKeyValue(const Slice& key, const Slice& value);
   Status OutputKeyValue(const Slice& key, const Slice& value);
   auto FinalizeDropResult() -> std::vector<GarbageBlocks>;
+  static void CompactDropResult(std::vector<GarbageBlocks>& garbage);
 };
 
 // An internal iterator that passes each key-value encountered to

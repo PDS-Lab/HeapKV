@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <cstdlib>
 #include <memory>
+#include <unordered_map>
 
 #include "cache/cache_helpers.h"
 #include "cache/cache_key.h"
@@ -12,9 +13,12 @@
 #include "db/dbformat.h"
 #include "db/heap/heap_alloc_job.h"
 #include "db/heap/heap_file.h"
+#include "db/heap/heap_free_job.h"
+#include "db/heap/heap_garbage_collector.h"
 #include "db/heap/heap_value_index.h"
 #include "db/heap/io_engine.h"
 #include "memory/memory_allocator_impl.h"
+#include "port/port_posix.h"
 #include "rocksdb/advanced_cache.h"
 #include "rocksdb/options.h"
 #include "rocksdb/rocksdb_namespace.h"
@@ -101,12 +105,29 @@ class HeapValueGetContext {
 
 class CFHeapStorage {
  private:
+  struct PendingHeapFreeJob {
+    uint8_t count_down_;
+    std::vector<HeapGarbageCollector::GarbageBlocks> garbage_;
+    PendingHeapFreeJob(uint8_t count_down,
+                       std::vector<HeapGarbageCollector::GarbageBlocks> garbage)
+        : count_down_(count_down), garbage_(std::move(garbage)) {}
+  };
+  struct HeapFreeArg {
+    CFHeapStorage* storage_;
+    std::vector<HeapGarbageCollector::GarbageBlocks> garbage_;
+  };
+
+ private:
   const ColumnFamilyData* cfd_;
   CacheKey base_key_;
   std::atomic_uint64_t next_job_id_{0};
   std::shared_ptr<Cache> heap_value_cache_;
   std::unique_ptr<HeapFile> heap_file_;
   std::unique_ptr<ExtentManager> extent_manager_;
+
+  port::Mutex mu_;
+  std::unordered_map<uint64_t, std::shared_ptr<PendingHeapFreeJob>>
+      pending_free_jobs_;
 
  public:
   CFHeapStorage(ColumnFamilyData* cfd, std::shared_ptr<Cache> heap_value_cache,
@@ -131,6 +152,19 @@ class CFHeapStorage {
         extent_manager_.get());
   }
 
+  auto NewFreeJob(std::vector<HeapGarbageCollector::GarbageBlocks> garbage)
+      -> std::unique_ptr<HeapFreeJob> {
+    return std::make_unique<HeapFreeJob>(
+        next_job_id_.fetch_add(1, std::memory_order_relaxed),
+        extent_manager_.get(), std::move(garbage));
+  }
+
+  void CommitGarbageBlocks(
+      const Compaction& compaction,
+      std::vector<HeapGarbageCollector::GarbageBlocks> garbage);
+
+  void NotifyFileDeletion(uint64_t file_number);
+
   auto GetHeapValueAsync(const ReadOptions& ro, UringIoEngine* io_engine,
                          const ParsedInternalKey& ikey,
                          const HeapValueIndex& hvi) -> HeapValueGetContext;
@@ -145,6 +179,8 @@ class CFHeapStorage {
       -> HeapValueCacheKey {
     return HeapValueCacheKey(base_key_, seq, hvi);
   }
+
+  static void BGWorkHeapFreeJob(void* arg);
 };
 
 }  // namespace heapkv

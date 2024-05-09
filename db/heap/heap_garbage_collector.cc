@@ -63,8 +63,13 @@ auto HeapGarbageCollector::FinalizeDropResult() -> std::vector<GarbageBlocks> {
   if (dropped_blocks_.empty()) {
     return {};
   }
-  // sort
-  std::sort(dropped_blocks_.begin(), dropped_blocks_.end(),
+  CompactDropResult(dropped_blocks_);
+  return std::move(dropped_blocks_);
+}
+
+void HeapGarbageCollector::CompactDropResult(
+    std::vector<GarbageBlocks>& garbage) {
+  std::sort(garbage.begin(), garbage.end(),
             [](const GarbageBlocks& a, const GarbageBlocks& b) {
               if (a.extent_number_ == b.extent_number_) {
                 return a.block_offset_ < b.block_offset_;
@@ -72,21 +77,20 @@ auto HeapGarbageCollector::FinalizeDropResult() -> std::vector<GarbageBlocks> {
               return a.extent_number_ < b.extent_number_;
             });
   // concat continuous blocks
-  GarbageBlocks base_blocks = dropped_blocks_[0];
+  GarbageBlocks base_blocks = garbage[0];
   size_t cur_pos = 0;
-  for (size_t i = 1; i < dropped_blocks_.size(); i++) {
-    auto& b = dropped_blocks_[i];
+  for (size_t i = 1; i < garbage.size(); i++) {
+    auto& b = garbage[i];
     if (base_blocks.extent_number_ == b.extent_number_ &&
         base_blocks.block_offset_ + base_blocks.block_cnt_ == b.block_offset_) {
       base_blocks.block_cnt_ += b.block_cnt_;
     } else {
-      dropped_blocks_[cur_pos++] = base_blocks;
+      garbage[cur_pos++] = base_blocks;
       base_blocks = b;
     }
   }
-  dropped_blocks_[cur_pos++] = base_blocks;
-  dropped_blocks_.resize(cur_pos);
-  return std::move(dropped_blocks_);
+  garbage[cur_pos++] = base_blocks;
+  garbage.resize(cur_pos);
 }
 
 }  // namespace heapkv

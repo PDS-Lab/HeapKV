@@ -28,6 +28,7 @@
 #include "db/error_handler.h"
 #include "db/event_helpers.h"
 #include "db/heap/heap_garbage_collector.h"
+#include "db/heap/heap_storage.h"
 #include "db/history_trimming_iterator.h"
 #include "db/log_writer.h"
 #include "db/merge_helper.h"
@@ -1765,6 +1766,7 @@ Status CompactionJob::InstallCompactionResults(
   compaction->AddInputDeletions(edit);
 
   std::unordered_map<uint64_t, BlobGarbageMeter::BlobStats> blob_total_garbage;
+  std::vector<heapkv::HeapGarbageCollector::GarbageBlocks> heap_total_garbage;
 
   for (const auto& sub_compact : compact_->sub_compact_states) {
     sub_compact.AddOutputsEdit(edit);
@@ -1787,19 +1789,20 @@ Status CompactionJob::InstallCompactionResults(
         }
       }
     }
-    // TODO(wnj): handle free job
+
     if (sub_compact.Current().GetHeapValueGarbageCollector()) {
       auto res = sub_compact.Current()
                      .GetHeapValueGarbageCollector()
                      ->FinalizeDropResult();
-      // std::cout << "HeapValueGarbageCollector: ";
-      // for (auto& g : res) {
-      //   std::cout << "{" << g.extent_number_ << ", " << g.block_offset_ << ",
-      //   "
-      //             << g.block_cnt_ << "} ";
-      // }
-      // std::cout << std::endl;
+      heap_total_garbage.insert(heap_total_garbage.end(), res.begin(),
+                                res.end());
     }
+  }
+  if (!heap_total_garbage.empty()) {
+    heapkv::HeapGarbageCollector::CompactDropResult(heap_total_garbage);
+    compact_->compaction->column_family_data()
+        ->heap_storage()
+        ->CommitGarbageBlocks(*compact_->compaction, heap_total_garbage);
   }
 
   for (const auto& pair : blob_total_garbage) {

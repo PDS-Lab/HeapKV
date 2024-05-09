@@ -30,7 +30,7 @@ auto ExtentManager::TryLockMostFreeExtent(double allocatable_threshold)
         allocatable_threshold) {
       auto latch_it = latch_.find(*it);
       if (latch_it != latch_.end()) {
-        return std::nullopt;
+        continue;
       } else {
         latch_.emplace(*it, decltype(latch_)::mapped_type());
         return *it;
