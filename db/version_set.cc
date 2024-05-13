@@ -28,6 +28,9 @@
 #include "db/compaction/compaction.h"
 #include "db/compaction/file_pri.h"
 #include "db/dbformat.h"
+#include "db/heap/heap_storage.h"
+#include "db/heap/heap_value_index.h"
+#include "db/heap/io_engine.h"
 #include "db/internal_stats.h"
 #include "db/log_reader.h"
 #include "db/log_writer.h"
@@ -41,6 +44,9 @@
 #include "db/version_edit_handler.h"
 #include "db/wide/wide_columns_helper.h"
 #include "file/file_util.h"
+#include "rocksdb/options.h"
+#include "rocksdb/slice.h"
+#include "rocksdb/status.h"
 #include "table/compaction_merging_iterator.h"
 
 #if USE_COROUTINES
@@ -2283,6 +2289,23 @@ Status Version::GetBlob(const ReadOptions& read_options, const Slice& user_key,
   return s;
 }
 
+Status Version::GetHeapValue(const ReadOptions& read_options,
+                             const ParsedInternalKey& ikey,
+                             const Slice& heap_value_index_slice,
+                             PinnableSlice* value) const {
+  Status s;
+  heapkv::HeapValueIndex heap_value_index;
+  s = heap_value_index.DecodeFrom(heap_value_index_slice);
+  if (!s.ok()) {
+    return s;
+  }
+  value->Reset();
+  s = cfd_->heap_storage()->GetHeapValue(read_options,
+                                         heapkv::GetThreadLocalIoEngine(), ikey,
+                                         heap_value_index, value);
+  return s;
+}
+
 void Version::MultiGetBlob(
     const ReadOptions& read_options, MultiGetRange& range,
     std::unordered_map<uint64_t, BlobReadContexts>& blob_ctxs) {
@@ -2396,18 +2419,20 @@ void Version::Get(const ReadOptions& read_options, const LookupKey& k,
   // GetImplOptions::is_blob_index; for the integrated BlobDB implementation, we
   // need to provide it here.
   bool is_blob_index = false;
+  bool is_heap_value_index = false;
   bool* const is_blob_to_use = is_blob ? is_blob : &is_blob_index;
   BlobFetcher blob_fetcher(this, read_options);
 
   assert(pinned_iters_mgr);
   GetContext get_context(
-      user_comparator(), merge_operator_, info_log_, db_statistics_,
-      status->ok() ? GetContext::kNotFound : GetContext::kMerge, user_key,
-      do_merge ? value : nullptr, do_merge ? columns : nullptr,
+      read_options, user_comparator(), merge_operator_, info_log_,
+      db_statistics_, status->ok() ? GetContext::kNotFound : GetContext::kMerge,
+      user_key, do_merge ? value : nullptr, do_merge ? columns : nullptr,
       do_merge ? timestamp : nullptr, value_found, merge_context, do_merge,
       max_covering_tombstone_seq, clock_, seq,
       merge_operator_ ? pinned_iters_mgr : nullptr, callback, is_blob_to_use,
-      tracing_get_id, &blob_fetcher);
+      &is_heap_value_index, tracing_get_id, &blob_fetcher,
+      cfd_->heap_storage());
 
   // Pin blocks that we read to hold merge operands
   if (merge_operator_) {
@@ -2510,6 +2535,28 @@ void Version::Get(const ReadOptions& read_options, const LookupKey& k,
           }
         }
 
+        if (is_heap_value_index && do_merge && (value || columns)) {
+          Slice heap_value_index =
+              value ? *value
+                    : WideColumnsHelper::GetDefaultColumn(columns->columns());
+          PinnableSlice result;
+          *status =
+              GetHeapValue(read_options, get_context.ikey_to_get_heap_value(),
+                           heap_value_index, &result);
+          if (!status->ok()) {
+            if (status->IsIncomplete()) {
+              get_context.MarkKeyMayExist();
+            }
+            return;
+          }
+          if (value) {
+            *value = std::move(result);
+          } else {
+            assert(columns);
+            columns->SetPlainValue(std::move(result));
+          }
+        }
+
         return;
       case GetContext::kDeleted:
         // Use empty error message for speed
@@ -2526,6 +2573,12 @@ void Version::Get(const ReadOptions& read_options, const LookupKey& k,
         return;
       case GetContext::kMergeOperatorFailed:
         *status = Status::Corruption(Status::SubCode::kMergeOperatorFailed);
+        return;
+      case GetContext::kUnexpectedHeapValueIndex:
+        ROCKS_LOG_ERROR(info_log_, "Encounter unexpected heap value index.");
+        *status = Status::NotSupported(
+            "Encounter unexpected heap value index. Please open DB with "
+            "enable_heapkv instead.");
         return;
     }
     f = fp.GetNextFile();
@@ -2589,13 +2642,15 @@ void Version::MultiGet(const ReadOptions& read_options, MultiGetRange* range,
   for (auto iter = range->begin(); iter != range->end(); ++iter) {
     assert(iter->s->ok() || iter->s->IsMergeInProgress());
     get_ctx.emplace_back(
-        user_comparator(), merge_operator_, info_log_, db_statistics_,
+        read_options, user_comparator(), merge_operator_, info_log_,
+        db_statistics_,
         iter->s->ok() ? GetContext::kNotFound : GetContext::kMerge,
         iter->ukey_with_ts, iter->value, iter->columns, iter->timestamp,
         nullptr, &(iter->merge_context), true,
         &iter->max_covering_tombstone_seq, clock_, nullptr,
         merge_operator_ ? &pinned_iters_mgr : nullptr, callback,
-        &iter->is_blob_index, tracing_mget_id, &blob_fetcher);
+        &iter->is_blob_index, &iter->is_heap_value_index, tracing_mget_id,
+        &blob_fetcher);
     // MergeInProgress status, if set, has been transferred to the get_context
     // state, so we set status to ok here. From now on, the iter status will
     // be used for IO errors, and get_context state will be used for any

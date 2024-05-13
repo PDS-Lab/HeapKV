@@ -67,6 +67,7 @@ enum EntryType {
   kEntryBlobIndex,
   kEntryDeleteWithTimestamp,
   kEntryWideColumnEntity,
+  kEntryHeapValueIndex,
   kEntryOther,
 };
 

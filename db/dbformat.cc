@@ -14,6 +14,7 @@
 #include "db/lookup_key.h"
 #include "monitoring/perf_context_imp.h"
 #include "port/port.h"
+#include "rocksdb/types.h"
 #include "util/coding.h"
 #include "util/string_util.h"
 
@@ -25,7 +26,7 @@ namespace ROCKSDB_NAMESPACE {
 // and the value type is embedded as the low 8 bits in the sequence
 // number in internal keys, we need to use the highest-numbered
 // ValueType, not the lowest).
-const ValueType kValueTypeForSeek = kTypeWideColumnEntity;
+const ValueType kValueTypeForSeek = kTypeHeapValueIndex;
 const ValueType kValueTypeForSeekForPrev = kTypeDeletion;
 const std::string kDisableUserTimestamp;
 
@@ -47,6 +48,8 @@ EntryType GetEntryType(ValueType value_type) {
       return kEntryBlobIndex;
     case kTypeWideColumnEntity:
       return kEntryWideColumnEntity;
+    case kTypeHeapValueIndex:
+      return kEntryHeapValueIndex;
     default:
       return kEntryOther;
   }

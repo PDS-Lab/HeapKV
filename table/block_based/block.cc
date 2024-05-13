@@ -16,6 +16,7 @@
 #include <unordered_map>
 #include <vector>
 
+#include "db/dbformat.h"
 #include "monitoring/perf_context_imp.h"
 #include "port/port.h"
 #include "port/stack_trace.h"
@@ -335,11 +336,11 @@ void MetaBlockIter::SeekImpl(const Slice& target) {
 // target = "seek_user_key @ type | seqno".
 //
 // For any type other than kTypeValue, kTypeDeletion, kTypeSingleDeletion,
-// kTypeBlobIndex, kTypeWideColumnEntity or kTypeMerge, this function behaves
-// identically to Seek().
+// kTypeBlobIndex, kTypeWideColumnEntity, kTypeMerge or kTypeHeapValueIndex,
+// this function behaves identically to Seek().
 //
 // For any type in kTypeValue, kTypeDeletion, kTypeSingleDeletion,
-// kTypeBlobIndex, kTypeWideColumnEntity, or kTypeMerge:
+// kTypeBlobIndex, kTypeWideColumnEntity, kTypeMerge or kTypeHeapValueIndex:
 //
 // If the return value is FALSE, iter location is undefined, and it means:
 // 1) there is no key in this block falling into the range:
@@ -452,7 +453,8 @@ bool DataBlockIter::SeekForGetImpl(const Slice& target) {
       value_type != ValueType::kTypeMerge &&
       value_type != ValueType::kTypeSingleDeletion &&
       value_type != ValueType::kTypeBlobIndex &&
-      value_type != ValueType::kTypeWideColumnEntity) {
+      value_type != ValueType::kTypeWideColumnEntity &&
+      value_type != ValueType::kTypeHeapValueIndex) {
     SeekImpl(target);
   }
 

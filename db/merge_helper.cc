@@ -425,6 +425,8 @@ Status MergeHelper::MergeUntil(InternalIterator* iter,
                            stats_, clock_, /* update_num_ops_stats */ false,
                            &op_failure_scope, &merge_result,
                            /* result_operand */ nullptr, &merge_result_type);
+      } else if (ikey.type == kTypeHeapValueIndex) {
+        // TODO(wnj): fetch heap value and do full merge
       } else if (ikey.type == kTypeWideColumnEntity) {
         s = TimedFullMerge(user_merge_operator_, ikey.user_key, kWideBaseValue,
                            iter->value(), merge_context_.GetOperands(), logger_,

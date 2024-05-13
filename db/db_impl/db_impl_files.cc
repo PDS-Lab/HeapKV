@@ -402,7 +402,9 @@ void DBImpl::DeleteObsoleteFileImpl(int job_id, const std::string& fname,
       if (cfd->IsDropped()) {
         continue;
       }
-      cfd->heap_storage()->NotifyFileDeletion(number);
+      if (cfd->heap_storage()) {
+        cfd->heap_storage()->NotifyFileDeletion(number);
+      }
     }
     mutex_.Unlock();
   }

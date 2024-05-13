@@ -36,6 +36,7 @@ struct KeyContext {
   SequenceNumber max_covering_tombstone_seq;
   bool key_exists;
   bool is_blob_index;
+  bool is_heap_value_index;
   void* cb_arg;
   PinnableSlice* value;
   PinnableWideColumns* columns;

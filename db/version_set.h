@@ -917,6 +917,11 @@ class Version {
                  FilePrefetchBuffer* prefetch_buffer, PinnableSlice* value,
                  uint64_t* bytes_read) const;
 
+  Status GetHeapValue(const ReadOptions& read_options,
+                      const ParsedInternalKey& ikey,
+                      const Slice& heap_value_index_slice,
+                      PinnableSlice* value) const;
+
   struct BlobReadContext {
     BlobReadContext(const BlobIndex& blob_idx, const KeyContext* key_ctx)
         : blob_index(blob_idx), key_context(key_ctx) {}

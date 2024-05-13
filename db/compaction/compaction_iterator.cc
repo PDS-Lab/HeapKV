@@ -12,6 +12,7 @@
 #include "db/blob/blob_file_builder.h"
 #include "db/blob/blob_index.h"
 #include "db/blob/prefetch_buffer_collection.h"
+#include "db/dbformat.h"
 #include "db/heap/heap_value_index.h"
 #include "db/snapshot_checker.h"
 #include "db/wide/wide_column_serialization.h"
@@ -226,12 +227,14 @@ void CompactionIterator::Next() {
 
 bool CompactionIterator::InvokeFilterIfNeeded(bool* need_skip,
                                               Slice* skip_until) {
+  // TODO(wnj): support compaction filter for heap value index
   if (!compaction_filter_) {
     return true;
   }
 
   if (ikey_.type != kTypeValue && ikey_.type != kTypeBlobIndex &&
-      ikey_.type != kTypeWideColumnEntity) {
+      ikey_.type != kTypeWideColumnEntity &&
+      ikey_.type != kTypeHeapValueIndex) {
     return true;
   }
 
@@ -620,7 +623,8 @@ void CompactionIterator::NextFromInput() {
       // not compact out.  We will keep this Put, but can drop it's data.
       // (See Optimization 3, below.)
       if (ikey_.type != kTypeValue && ikey_.type != kTypeBlobIndex &&
-          ikey_.type != kTypeWideColumnEntity) {
+          ikey_.type != kTypeWideColumnEntity &&
+          ikey_.type != kTypeHeapValueIndex) {
         ROCKS_LOG_FATAL(info_log_, "Unexpected key %s for compaction output",
                         ikey_.DebugString(allow_data_in_errors_, true).c_str());
         assert(false);
@@ -634,7 +638,10 @@ void CompactionIterator::NextFromInput() {
         assert(false);
       }
 
-      if (ikey_.type == kTypeBlobIndex || ikey_.type == kTypeWideColumnEntity) {
+      if (ikey_.type == kTypeBlobIndex || ikey_.type == kTypeWideColumnEntity ||
+          ikey_.type == kTypeHeapValueIndex) {
+        // the HeapGarbageCollector will ignore kTypeValue and treat this kvpair
+        // as garbage
         ikey_.type = kTypeValue;
         current_key_.UpdateInternalKey(ikey_.sequence, ikey_.type);
       }
@@ -800,7 +807,8 @@ void CompactionIterator::NextFromInput() {
             // happened
             if (next_ikey.type != kTypeValue &&
                 next_ikey.type != kTypeBlobIndex &&
-                next_ikey.type != kTypeWideColumnEntity) {
+                next_ikey.type != kTypeWideColumnEntity &&
+                next_ikey.type != kTypeHeapValueIndex) {
               ++iter_stats_.num_single_del_mismatch;
             }
 
@@ -1294,7 +1302,10 @@ void CompactionIterator::PrepareOutput() {
     //
     // Can we do the same for levels above bottom level as long as
     // KeyNotExistsBeyondOutputLevel() return true?
-    if (Valid() && compaction_ != nullptr &&
+    //
+    // ! disable this feature cause the sequence number is part of heap value
+    // ! cache key
+    if (false && Valid() && compaction_ != nullptr &&
         !compaction_->allow_ingest_behind() && bottommost_level_ &&
         DefinitelyInSnapshot(ikey_.sequence, earliest_snapshot_) &&
         ikey_.type != kTypeMerge && current_key_committed_ &&

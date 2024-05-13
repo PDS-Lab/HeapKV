@@ -295,8 +295,8 @@ class CompactionIterator {
   bool ExtractLargeValueIfNeededImpl();
 
   // Extracts large values as described above, and updates the internal key's
-  // type to kTypeBlobIndex if the value got extracted. Should only be called
-  // for regular values (kTypeValue).
+  // type to kTypeBlobIndex or kTypeHeapValueIndex if the value got extracted.
+  // Should only be called for regular values (kTypeValue).
   void ExtractLargeValueIfNeeded();
 
   // Relocates valid blobs residing in the oldest blob files if garbage

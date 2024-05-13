@@ -986,6 +986,12 @@ static bool SaveValue(void* arg, const char* entry) {
       type = kTypeRangeDeletion;
     }
     switch (type) {
+      case kTypeHeapValueIndex: {
+        *(s->status) =
+            Status::Corruption("HeapValueIndex shouldn't appear in memtable");
+        *(s->found_final_value) = true;
+        return false;
+      }
       case kTypeBlobIndex: {
         if (!s->do_merge) {
           *(s->status) = Status::NotSupported(

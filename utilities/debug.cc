@@ -7,6 +7,7 @@
 #include "rocksdb/utilities/debug.h"
 
 #include "db/db_impl/db_impl.h"
+#include "db/dbformat.h"
 #include "rocksdb/utilities/options_type.h"
 
 namespace ROCKSDB_NAMESPACE {
@@ -38,7 +39,8 @@ static std::unordered_map<std::string, ValueType> value_type_string_map = {
     {"TypeCommitXIDAndTimestamp", ValueType::kTypeCommitXIDAndTimestamp},
     {"TypeWideColumnEntity", ValueType::kTypeWideColumnEntity},
     {"TypeColumnFamilyWideColumnEntity",
-     ValueType::kTypeColumnFamilyWideColumnEntity}};
+     ValueType::kTypeColumnFamilyWideColumnEntity},
+    {"TypeHeapValueIndex", ValueType::kTypeHeapValueIndex}};
 
 std::string KeyVersion::GetTypeName() const {
   std::string type_name;

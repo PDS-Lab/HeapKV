@@ -7,6 +7,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file. See the AUTHORS file for names of contributors.
 
+#include "db/dbformat.h"
 #include "db_stress_tool/expected_state.h"
 #ifdef GFLAGS
 #include "db/wide/wide_columns_helper.h"
@@ -1201,7 +1202,8 @@ class NonBatchedOpsStressTest : public StressTest {
       if (ro_copy.iter_start_ts) {
         const ValueType value_type = ExtractValueType(iter->key());
         if (value_type != kTypeValue && value_type != kTypeBlobIndex &&
-            value_type != kTypeWideColumnEntity) {
+            value_type != kTypeWideColumnEntity &&
+            value_type != kTypeHeapValueIndex) {
           continue;
         }
       }

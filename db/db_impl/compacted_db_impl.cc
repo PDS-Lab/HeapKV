@@ -88,8 +88,8 @@ Status CompactedDBImpl::Get(const ReadOptions& _read_options,
   std::string* ts =
       user_comparator_->timestamp_size() > 0 ? timestamp : nullptr;
   LookupKey lkey(key, kMaxSequenceNumber, read_options.timestamp);
-  GetContext get_context(user_comparator_, nullptr, nullptr, nullptr,
-                         GetContext::kNotFound, lkey.user_key(), value,
+  GetContext get_context(read_options, user_comparator_, nullptr, nullptr,
+                         nullptr, GetContext::kNotFound, lkey.user_key(), value,
                          /*columns=*/nullptr, ts, nullptr, nullptr, true,
                          nullptr, nullptr, nullptr, nullptr, &read_cb);
 
@@ -194,8 +194,9 @@ std::vector<Status> CompactedDBImpl::MultiGet(
       LookupKey lkey(keys[idx], kMaxSequenceNumber, read_options.timestamp);
       std::string* timestamp = timestamps ? &(*timestamps)[idx] : nullptr;
       GetContext get_context(
-          user_comparator_, nullptr, nullptr, nullptr, GetContext::kNotFound,
-          lkey.user_key(), &pinnable_val, /*columns=*/nullptr,
+          _read_options, user_comparator_, nullptr, nullptr, nullptr,
+          GetContext::kNotFound, lkey.user_key(), &pinnable_val,
+          /*columns=*/nullptr,
           user_comparator_->timestamp_size() > 0 ? timestamp : nullptr, nullptr,
           nullptr, true, nullptr, nullptr, nullptr, nullptr, &read_cb);
       Status s =

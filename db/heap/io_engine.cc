@@ -30,7 +30,7 @@ void UringIoEngine::PollCq(bool wait) {
     io_uring_cq_advance(&ring_, n);
     return;
   }
-  if (wait) {
+  if (wait && inflight_ > 0) {
     int ret = io_uring_wait_cqe(&ring_, cqes);
     if (ret != 0) {
       std::cerr << "io_uring_wait_cqe failed: " << ret << " " << strerror(-ret)

@@ -77,6 +77,7 @@ DBIter::DBIter(Env* _env, const ReadOptions& read_options,
       verify_checksums_(read_options.verify_checksums),
       expose_blob_index_(expose_blob_index),
       is_blob_(false),
+      is_heap_value_(false),
       arena_mode_(arena_mode),
       io_activity_(read_options.io_activity),
       db_impl_(db_impl),
@@ -141,6 +142,7 @@ void DBIter::Next() {
   // Release temporarily pinned blocks from last operation
   ReleaseTempPinnedData();
   ResetBlobValue();
+  ResetHeapValue();
   ResetValueAndColumns();
   local_stats_.skip_count_ += num_internal_keys_skipped_;
   local_stats_.skip_count_--;
@@ -220,6 +222,32 @@ bool DBIter::SetBlobValueIfNeeded(const Slice& user_key,
   }
 
   is_blob_ = true;
+  return true;
+}
+
+bool DBIter::SetHeapValue(const ParsedInternalKey& ikey,
+                          const Slice& heap_value_index) {
+  assert(!is_heap_value_);
+  assert(heap_value_.empty());
+
+  if (!version_) {
+    status_ = Status::Corruption("Encountered unexpected heap value index.");
+    valid_ = false;
+    return false;
+  }
+  ReadOptions read_options;
+  read_options.read_tier = read_tier_;
+  read_options.fill_cache = fill_cache_;
+  read_options.verify_checksums = verify_checksums_;
+  read_options.io_activity = io_activity_;
+  const Status s = version_->GetHeapValue(read_options, ikey, heap_value_index,
+                                          &heap_value_);
+  if (!s.ok()) {
+    status_ = s;
+    valid_ = false;
+    return false;
+  }
+  is_heap_value_ = true;
   return true;
 }
 
@@ -395,6 +423,7 @@ bool DBIter::FindNextUserEntryInternal(bool skipping_saved_key,
           case kTypeValue:
           case kTypeBlobIndex:
           case kTypeWideColumnEntity:
+          case kTypeHeapValueIndex:
             if (!PrepareValue()) {
               return false;
             }
@@ -417,6 +446,11 @@ bool DBIter::FindNextUserEntryInternal(bool skipping_saved_key,
               if (!SetValueAndColumnsFromEntity(iter_.value())) {
                 return false;
               }
+            } else if (ikey_.type == kTypeHeapValueIndex) {
+              if (!SetHeapValue(ikey_, iter_.value())) {
+                return false;
+              }
+              SetValueAndColumnsFromPlain(heap_value_);
             } else {
               assert(ikey_.type == kTypeValue);
               SetValueAndColumnsFromPlain(iter_.value());
@@ -620,6 +654,22 @@ bool DBIter::MergeValuesNewToOld() {
         return false;
       }
       return true;
+    } else if (kTypeHeapValueIndex == ikey.type) {
+      if (!SetHeapValue(ikey_, iter_.value())) {
+        return false;
+      }
+      valid_ = true;
+      if (!MergeWithPlainBaseValue(heap_value_, ikey_.user_key)) {
+        return false;
+      }
+      ResetHeapValue();
+      // iter_ is positioned after put
+      iter_.Next();
+      if (!iter_.status().ok()) {
+        valid_ = false;
+        return false;
+      }
+      return true;
     } else if (kTypeWideColumnEntity == ikey.type) {
       if (!MergeWithWideColumnBaseValue(iter_.value(), ikey.user_key)) {
         return false;
@@ -666,6 +716,7 @@ void DBIter::Prev() {
   PERF_CPU_TIMER_GUARD(iter_prev_cpu_nanos, clock_);
   ReleaseTempPinnedData();
   ResetBlobValue();
+  ResetHeapValue();
   ResetValueAndColumns();
   ResetInternalKeysSkippedCounter();
   bool ok = true;
@@ -920,6 +971,7 @@ bool DBIter::FindValueForCurrentKey() {
       case kTypeValue:
       case kTypeBlobIndex:
       case kTypeWideColumnEntity:
+      case kTypeHeapValueIndex:
         if (iter_.iter()->IsValuePinned()) {
           pinned_value_ = iter_.value();
         } else {
@@ -1023,6 +1075,23 @@ bool DBIter::FindValueForCurrentKey() {
         ResetBlobValue();
 
         return true;
+      } else if (last_not_merge_type == kTypeHeapValueIndex) {
+        ParsedInternalKey ik;
+        Status s = ParseInternalKey(saved_key_.GetInternalKey(), &ik, false);
+        if (!s.ok()) {
+          status_ = s;
+          valid_ = false;
+          return false;
+        }
+        if (!SetHeapValue(ik, pinned_value_)) {
+          return false;
+        }
+        valid_ = true;
+        if (!MergeWithPlainBaseValue(heap_value_, saved_key_.GetUserKey())) {
+          return false;
+        }
+        ResetHeapValue();
+        return true;
       } else if (last_not_merge_type == kTypeWideColumnEntity) {
         if (!MergeWithWideColumnBaseValue(pinned_value_,
                                           saved_key_.GetUserKey())) {
@@ -1051,6 +1120,20 @@ bool DBIter::FindValueForCurrentKey() {
                                                      : blob_value_);
 
       break;
+    case kTypeHeapValueIndex: {
+      ParsedInternalKey ik;
+      Status s = ParseInternalKey(saved_key_.GetInternalKey(), &ik, false);
+      if (!s.ok()) {
+        status_ = s;
+        valid_ = false;
+        return false;
+      }
+      if (!SetHeapValue(ik, pinned_value_)) {
+        return false;
+      }
+      SetValueAndColumnsFromPlain(heap_value_);
+      break;
+    }
     case kTypeWideColumnEntity:
       if (!SetValueAndColumnsFromEntity(pinned_value_)) {
         return false;
@@ -1144,7 +1227,7 @@ bool DBIter::FindValueForCurrentKeyUsingSeek() {
     saved_timestamp_.assign(ts.data(), ts.size());
   }
   if (ikey.type == kTypeValue || ikey.type == kTypeBlobIndex ||
-      ikey.type == kTypeWideColumnEntity) {
+      ikey.type == kTypeWideColumnEntity || ikey.type == kTypeHeapValueIndex) {
     assert(iter_.iter()->IsValuePinned());
     pinned_value_ = iter_.value();
     if (ikey.type == kTypeBlobIndex) {
@@ -1158,6 +1241,11 @@ bool DBIter::FindValueForCurrentKeyUsingSeek() {
       if (!SetValueAndColumnsFromEntity(pinned_value_)) {
         return false;
       }
+    } else if (ikey.type == kTypeHeapValueIndex) {
+      if (!SetHeapValue(ikey, pinned_value_)) {
+        return false;
+      }
+      SetValueAndColumnsFromPlain(heap_value_);
     } else {
       assert(ikey.type == kTypeValue);
       SetValueAndColumnsFromPlain(pinned_value_);
@@ -1231,6 +1319,16 @@ bool DBIter::FindValueForCurrentKeyUsingSeek() {
 
       ResetBlobValue();
 
+      return true;
+    } else if (ikey.type == kTypeHeapValueIndex) {
+      if (!SetHeapValue(ikey, iter_.value())) {
+        return false;
+      }
+      valid_ = true;
+      if (!MergeWithPlainBaseValue(heap_value_, saved_key_.GetUserKey())) {
+        return false;
+      }
+      ResetHeapValue();
       return true;
     } else if (ikey.type == kTypeWideColumnEntity) {
       if (!MergeWithWideColumnBaseValue(iter_.value(),
@@ -1479,6 +1577,7 @@ void DBIter::Seek(const Slice& target) {
   status_ = Status::OK();
   ReleaseTempPinnedData();
   ResetBlobValue();
+  ResetHeapValue();
   ResetValueAndColumns();
   ResetInternalKeysSkippedCounter();
 
@@ -1555,6 +1654,7 @@ void DBIter::SeekForPrev(const Slice& target) {
   status_ = Status::OK();
   ReleaseTempPinnedData();
   ResetBlobValue();
+  ResetHeapValue();
   ResetValueAndColumns();
   ResetInternalKeysSkippedCounter();
 
@@ -1616,6 +1716,7 @@ void DBIter::SeekToFirst() {
   direction_ = kForward;
   ReleaseTempPinnedData();
   ResetBlobValue();
+  ResetHeapValue();
   ResetValueAndColumns();
   ResetInternalKeysSkippedCounter();
   ClearSavedValue();
@@ -1679,6 +1780,7 @@ void DBIter::SeekToLast() {
   direction_ = kReverse;
   ReleaseTempPinnedData();
   ResetBlobValue();
+  ResetHeapValue();
   ResetValueAndColumns();
   ResetInternalKeysSkippedCounter();
   ClearSavedValue();

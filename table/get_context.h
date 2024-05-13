@@ -7,6 +7,8 @@
 #include <string>
 
 #include "db/read_callback.h"
+#include "rocksdb/options.h"
+#include "rocksdb/slice.h"
 #include "rocksdb/types.h"
 
 namespace ROCKSDB_NAMESPACE {
@@ -20,6 +22,9 @@ class PinnedIteratorsManager;
 class Statistics;
 class SystemClock;
 struct ParsedInternalKey;
+namespace heapkv {
+class CFHeapStorage;
+}
 
 // Data structure for accumulating statistics during a point lookup. At the
 // end of the point lookup, the corresponding ticker stats are updated. This
@@ -76,6 +81,7 @@ class GetContext {
     kMerge,  // saver contains the current merge result (the operands)
     kUnexpectedBlobIndex,
     kMergeOperatorFailed,
+    kUnexpectedHeapValueIndex,
   };
   GetContextStats get_context_stats_;
 
@@ -99,26 +105,31 @@ class GetContext {
   // and false if all the merge operands associated with user_key has to be
   // returned. Id do_merge=false then all the merge operands are stored in
   // merge_context and they are never merged. The value pointer is untouched.
-  GetContext(const Comparator* ucmp, const MergeOperator* merge_operator,
-             Logger* logger, Statistics* statistics, GetState init_state,
-             const Slice& user_key, PinnableSlice* value,
-             PinnableWideColumns* columns, bool* value_found,
-             MergeContext* merge_context, bool do_merge,
-             SequenceNumber* max_covering_tombstone_seq, SystemClock* clock,
-             SequenceNumber* seq = nullptr,
-             PinnedIteratorsManager* _pinned_iters_mgr = nullptr,
-             ReadCallback* callback = nullptr, bool* is_blob_index = nullptr,
-             uint64_t tracing_get_id = 0, BlobFetcher* blob_fetcher = nullptr);
-  GetContext(const Comparator* ucmp, const MergeOperator* merge_operator,
-             Logger* logger, Statistics* statistics, GetState init_state,
-             const Slice& user_key, PinnableSlice* value,
-             PinnableWideColumns* columns, std::string* timestamp,
+  GetContext(const ReadOptions& ro, const Comparator* ucmp,
+             const MergeOperator* merge_operator, Logger* logger,
+             Statistics* statistics, GetState init_state, const Slice& user_key,
+             PinnableSlice* value, PinnableWideColumns* columns,
              bool* value_found, MergeContext* merge_context, bool do_merge,
              SequenceNumber* max_covering_tombstone_seq, SystemClock* clock,
              SequenceNumber* seq = nullptr,
              PinnedIteratorsManager* _pinned_iters_mgr = nullptr,
              ReadCallback* callback = nullptr, bool* is_blob_index = nullptr,
-             uint64_t tracing_get_id = 0, BlobFetcher* blob_fetcher = nullptr);
+             bool* is_heap_value_index = nullptr, uint64_t tracing_get_id = 0,
+             BlobFetcher* blob_fetcher = nullptr,
+             heapkv::CFHeapStorage* heap_storage = nullptr);
+  GetContext(const ReadOptions& ro, const Comparator* ucmp,
+             const MergeOperator* merge_operator, Logger* logger,
+             Statistics* statistics, GetState init_state, const Slice& user_key,
+             PinnableSlice* value, PinnableWideColumns* columns,
+             std::string* timestamp, bool* value_found,
+             MergeContext* merge_context, bool do_merge,
+             SequenceNumber* max_covering_tombstone_seq, SystemClock* clock,
+             SequenceNumber* seq = nullptr,
+             PinnedIteratorsManager* _pinned_iters_mgr = nullptr,
+             ReadCallback* callback = nullptr, bool* is_blob_index = nullptr,
+             bool* is_heap_value_index = nullptr, uint64_t tracing_get_id = 0,
+             BlobFetcher* blob_fetcher = nullptr,
+             heapkv::CFHeapStorage* heap_storage = nullptr);
 
   GetContext() = delete;
 
@@ -188,6 +199,10 @@ class GetContext {
     }
   }
 
+  const ParsedInternalKey& ikey_to_get_heap_value() const {
+    return parsed_key_for_heap_index_;
+  }
+
   uint64_t get_tracing_get_id() const { return tracing_get_id_; }
 
   void push_operand(const Slice& value, Cleanable* value_pinner);
@@ -205,9 +220,12 @@ class GetContext {
 
   bool GetBlobValue(const Slice& user_key, const Slice& blob_index,
                     PinnableSlice* blob_value);
+  bool GetHeapValue(const ParsedInternalKey& ikey,
+                    const Slice& heap_value_index, PinnableSlice* heap_value);
 
   void appendToReplayLog(ValueType type, Slice value, Slice ts);
 
+  const ReadOptions& read_options_;
   const Comparator* ucmp_;
   const MergeOperator* merge_operator_;
   // the merge operations encountered;
@@ -216,6 +234,7 @@ class GetContext {
 
   GetState state_;
   Slice user_key_;
+  ParsedInternalKey parsed_key_for_heap_index_;
   // When a blob index is found with the user key containing timestamp,
   // this copies the corresponding user key on record in the sst file
   // and is later used for blob verification.
@@ -241,10 +260,12 @@ class GetContext {
   // are never merged.
   bool do_merge_;
   bool* is_blob_index_;
+  bool* is_heap_value_index_;
   // Used for block cache tracing only. A tracing get id uniquely identifies a
   // Get or a MultiGet.
   const uint64_t tracing_get_id_;
   BlobFetcher* blob_fetcher_;
+  heapkv::CFHeapStorage* heap_storage_;
 };
 
 // Call this to replay a log and bring the get_context up to date. The replay

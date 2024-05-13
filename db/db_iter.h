@@ -12,11 +12,13 @@
 #include <string>
 
 #include "db/db_impl/db_impl.h"
+#include "db/dbformat.h"
 #include "db/range_del_aggregator.h"
 #include "memory/arena.h"
 #include "options/cf_options.h"
 #include "rocksdb/db.h"
 #include "rocksdb/iterator.h"
+#include "rocksdb/slice.h"
 #include "rocksdb/wide_columns.h"
 #include "table/iterator_wrapper.h"
 #include "util/autovector.h"
@@ -308,6 +310,14 @@ class DBIter final : public Iterator {
     blob_value_.Reset();
   }
 
+  bool SetHeapValue(const ParsedInternalKey& ikey,
+                    const Slice& heap_value_index);
+
+  void ResetHeapValue() {
+    is_heap_value_ = false;
+    heap_value_.Reset();
+  }
+
   void SetValueAndColumnsFromPlain(const Slice& slice) {
     assert(value_.empty());
     assert(wide_columns_.empty());
@@ -371,6 +381,7 @@ class DBIter final : public Iterator {
   Slice pinned_value_;
   // for prefix seek mode to support prev()
   PinnableSlice blob_value_;
+  PinnableSlice heap_value_;
   // Value of the default column
   Slice value_;
   // All columns (i.e. name-value pairs)
@@ -411,6 +422,7 @@ class DBIter final : public Iterator {
   // the stacked BlobDB implementation is used, false otherwise.
   bool expose_blob_index_;
   bool is_blob_;
+  bool is_heap_value_;
   bool arena_mode_;
   const Env::IOActivity io_activity_;
   // List of operands for merge operator.

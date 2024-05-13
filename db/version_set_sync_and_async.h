@@ -159,6 +159,13 @@ DEFINE_SYNC_AND_ASYNC(Status, Version::MultiGetFromSST)
         *status = Status::Corruption(Status::SubCode::kMergeOperatorFailed);
         file_range.MarkKeyDone(iter);
         continue;
+      case GetContext::kUnexpectedHeapValueIndex:
+        ROCKS_LOG_ERROR(info_log_, "Encounter unexpected heap value index.");
+        *status = Status::NotSupported(
+            "Encounter unexpected heap value index. Please open DB with "
+            "enable_heapkv instead.");
+        file_range.MarkKeyDone(iter);
+        continue;
     }
   }
 

@@ -6,6 +6,10 @@
 #include "table/get_context.h"
 
 #include "db/blob//blob_fetcher.h"
+#include "db/dbformat.h"
+#include "db/heap/heap_storage.h"
+#include "db/heap/heap_value_index.h"
+#include "db/heap/io_engine.h"
 #include "db/merge_helper.h"
 #include "db/pinned_iterators_manager.h"
 #include "db/read_callback.h"
@@ -14,21 +18,27 @@
 #include "monitoring/perf_context_imp.h"
 #include "monitoring/statistics_impl.h"
 #include "rocksdb/merge_operator.h"
+#include "rocksdb/options.h"
+#include "rocksdb/slice.h"
 #include "rocksdb/statistics.h"
+#include "rocksdb/status.h"
 #include "rocksdb/system_clock.h"
 
 namespace ROCKSDB_NAMESPACE {
 
 GetContext::GetContext(
-    const Comparator* ucmp, const MergeOperator* merge_operator, Logger* logger,
-    Statistics* statistics, GetState init_state, const Slice& user_key,
-    PinnableSlice* pinnable_val, PinnableWideColumns* columns,
-    std::string* timestamp, bool* value_found, MergeContext* merge_context,
-    bool do_merge, SequenceNumber* _max_covering_tombstone_seq,
-    SystemClock* clock, SequenceNumber* seq,
-    PinnedIteratorsManager* _pinned_iters_mgr, ReadCallback* callback,
-    bool* is_blob_index, uint64_t tracing_get_id, BlobFetcher* blob_fetcher)
-    : ucmp_(ucmp),
+    const ReadOptions& ro, const Comparator* ucmp,
+    const MergeOperator* merge_operator, Logger* logger, Statistics* statistics,
+    GetState init_state, const Slice& user_key, PinnableSlice* pinnable_val,
+    PinnableWideColumns* columns, std::string* timestamp, bool* value_found,
+    MergeContext* merge_context, bool do_merge,
+    SequenceNumber* _max_covering_tombstone_seq, SystemClock* clock,
+    SequenceNumber* seq, PinnedIteratorsManager* _pinned_iters_mgr,
+    ReadCallback* callback, bool* is_blob_index, bool* is_heap_value_index,
+    uint64_t tracing_get_id, BlobFetcher* blob_fetcher,
+    heapkv::CFHeapStorage* heap_storage)
+    : read_options_(ro),
+      ucmp_(ucmp),
       merge_operator_(merge_operator),
       logger_(logger),
       statistics_(statistics),
@@ -47,15 +57,17 @@ GetContext::GetContext(
       callback_(callback),
       do_merge_(do_merge),
       is_blob_index_(is_blob_index),
+      is_heap_value_index_(is_heap_value_index),
       tracing_get_id_(tracing_get_id),
-      blob_fetcher_(blob_fetcher) {
+      blob_fetcher_(blob_fetcher),
+      heap_storage_(heap_storage) {
   if (seq_) {
     *seq_ = kMaxSequenceNumber;
   }
   sample_ = should_sample_file_read();
 }
 
-GetContext::GetContext(const Comparator* ucmp,
+GetContext::GetContext(const ReadOptions& ro, const Comparator* ucmp,
                        const MergeOperator* merge_operator, Logger* logger,
                        Statistics* statistics, GetState init_state,
                        const Slice& user_key, PinnableSlice* pinnable_val,
@@ -65,12 +77,15 @@ GetContext::GetContext(const Comparator* ucmp,
                        SystemClock* clock, SequenceNumber* seq,
                        PinnedIteratorsManager* _pinned_iters_mgr,
                        ReadCallback* callback, bool* is_blob_index,
-                       uint64_t tracing_get_id, BlobFetcher* blob_fetcher)
-    : GetContext(ucmp, merge_operator, logger, statistics, init_state, user_key,
-                 pinnable_val, columns, /*timestamp=*/nullptr, value_found,
-                 merge_context, do_merge, _max_covering_tombstone_seq, clock,
-                 seq, _pinned_iters_mgr, callback, is_blob_index,
-                 tracing_get_id, blob_fetcher) {}
+                       bool* is_heap_value_index, uint64_t tracing_get_id,
+                       BlobFetcher* blob_fetcher,
+                       heapkv::CFHeapStorage* heap_storage)
+    : GetContext(ro, ucmp, merge_operator, logger, statistics, init_state,
+                 user_key, pinnable_val, columns, /*timestamp=*/nullptr,
+                 value_found, merge_context, do_merge,
+                 _max_covering_tombstone_seq, clock, seq, _pinned_iters_mgr,
+                 callback, is_blob_index, is_heap_value_index, tracing_get_id,
+                 blob_fetcher, heap_storage) {}
 
 void GetContext::appendToReplayLog(ValueType type, Slice value, Slice ts) {
   if (replay_log_) {
@@ -279,7 +294,8 @@ bool GetContext::SaveValue(const ParsedInternalKey& parsed_key,
     // Key matches. Process it
     if ((type == kTypeValue || type == kTypeMerge || type == kTypeBlobIndex ||
          type == kTypeWideColumnEntity || type == kTypeDeletion ||
-         type == kTypeDeletionWithTimestamp || type == kTypeSingleDeletion) &&
+         type == kTypeDeletionWithTimestamp || type == kTypeSingleDeletion ||
+         type == kTypeHeapValueIndex) &&
         max_covering_tombstone_seq_ != nullptr &&
         *max_covering_tombstone_seq_ > parsed_key.sequence) {
       // Note that deletion types are also considered, this is for the case
@@ -291,6 +307,7 @@ bool GetContext::SaveValue(const ParsedInternalKey& parsed_key,
       case kTypeValue:
       case kTypeBlobIndex:
       case kTypeWideColumnEntity:
+      case kTypeHeapValueIndex:
         assert(state_ == kNotFound || state_ == kMerge);
         if (type == kTypeBlobIndex) {
           if (is_blob_index_ == nullptr) {
@@ -304,11 +321,32 @@ bool GetContext::SaveValue(const ParsedInternalKey& parsed_key,
           *is_blob_index_ = (type == kTypeBlobIndex);
         }
 
+        if (type == kTypeHeapValueIndex) {
+          if (is_heap_value_index_ == nullptr) {
+            state_ = kUnexpectedHeapValueIndex;
+            return false;
+          }
+        }
+
+        if (is_heap_value_index_ != nullptr) {
+          *is_heap_value_index_ = (type == kTypeHeapValueIndex);
+        }
+
         if (kNotFound == state_) {
           state_ = kFound;
           if (do_merge_) {
             if (type == kTypeBlobIndex && ucmp_->timestamp_size() != 0) {
               ukey_with_ts_found_.PinSelf(parsed_key.user_key);
+            }
+            if (type == kTypeHeapValueIndex) {
+              if (ucmp_->timestamp_size() != 0) {
+                ukey_with_ts_found_.PinSelf(parsed_key.user_key);
+                parsed_key_for_heap_index_ = ParsedInternalKey(
+                    ukey_with_ts_found_, parsed_key.sequence, type);
+              } else {
+                parsed_key_for_heap_index_ =
+                    ParsedInternalKey(user_key_, parsed_key.sequence, type);
+              }
             }
             if (LIKELY(pinnable_val_ != nullptr)) {
               Slice value_to_use = value;
@@ -354,6 +392,13 @@ bool GetContext::SaveValue(const ParsedInternalKey& parsed_key,
               }
               Slice blob_value(pin_val);
               push_operand(blob_value, nullptr);
+            } else if (type == kTypeHeapValueIndex) {
+              PinnableSlice pin_val;
+              if (GetHeapValue(parsed_key, value, &pin_val) == false) {
+                return false;
+              }
+              Slice heap_value(pin_val);
+              push_operand(heap_value, nullptr);
             } else if (type == kTypeWideColumnEntity) {
               Slice value_copy = value;
               Slice value_of_default;
@@ -387,6 +432,21 @@ bool GetContext::SaveValue(const ParsedInternalKey& parsed_key,
               // API and the current value should be part of
               // merge_context_->operand_list
               push_operand(blob_value, nullptr);
+            }
+          } else if (type == kTypeHeapValueIndex) {
+            PinnableSlice pin_val;
+            if (GetHeapValue(parsed_key, value, &pin_val) == false) {
+              return false;
+            }
+            Slice heap_value(pin_val);
+            state_ = kFound;
+            if (do_merge_) {
+              MergeWithPlainBaseValue(heap_value);
+            } else {
+              // It means this function is called as part of DB GetMergeOperands
+              // API and the current value should be part of
+              // merge_context_->operand_list
+              push_operand(heap_value, nullptr);
             }
           } else if (type == kTypeWideColumnEntity) {
             state_ = kFound;
@@ -547,6 +607,30 @@ bool GetContext::GetBlobValue(const Slice& user_key, const Slice& blob_index,
     return false;
   }
   *is_blob_index_ = false;
+  return true;
+}
+
+bool GetContext::GetHeapValue(const ParsedInternalKey& ikey,
+                              const Slice& heap_index,
+                              PinnableSlice* heap_value) {
+  heapkv::HeapValueIndex hvi;
+  Status s = hvi.DecodeFrom(heap_index);
+  if (!s.ok()) {
+    state_ = kCorrupt;
+    return false;
+  }
+
+  s = heap_storage_->GetHeapValue(
+      read_options_, heapkv::GetThreadLocalIoEngine(), ikey, hvi, heap_value);
+  if (!s.ok()) {
+    if (s.IsIncomplete()) {
+      MarkKeyMayExist();
+      return false;
+    }
+    state_ = kCorrupt;
+    return false;
+  }
+  *is_heap_value_index_ = false;
   return true;
 }
 
