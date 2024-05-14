@@ -94,11 +94,10 @@ Status CFHeapStorage::OpenOrCreate(
   return s;
 }
 
-auto CFHeapStorage::GetHeapValueAsync(const ReadOptions& ro,
-                                      UringIoEngine* io_engine,
-                                      const ParsedInternalKey& ikey,
-                                      const HeapValueIndex& hvi)
-    -> HeapValueGetContext {
+auto CFHeapStorage::GetHeapValueAsync(
+    const ReadOptions& ro, UringIoEngine* io_engine,
+    const ParsedInternalKey& ikey,
+    const HeapValueIndex& hvi) -> HeapValueGetContext {
   if (heap_value_cache_) {
     HeapValueCacheKey key = NewCacheKey(ikey.sequence, hvi);
     auto handle = heap_value_cache_->Lookup(key.AsSlice());
@@ -114,13 +113,18 @@ auto CFHeapStorage::GetHeapValueAsync(const ReadOptions& ro,
   const bool no_io = ro.read_tier == kBlockCacheTier;
 
   if (no_io) {
-    return HeapValueGetContext(ikey.sequence, hvi, nullptr,
-                               {nullptr, std::free});
+    return HeapValueGetContext(
+        Status::Incomplete("Cannot read blob(s): no disk I/O allowed"),
+        ikey.sequence, hvi, nullptr, {nullptr, std::free});
   }
 
-  void* ptr = nullptr;
-  posix_memalign(&ptr, kHeapFileBlockSize,
-                 kHeapFileBlockSize * hvi.block_cnt());
+  void* ptr = std::aligned_alloc(kHeapFileBlockSize,
+                                 kHeapFileBlockSize * hvi.block_cnt());
+  if (ptr == nullptr) {
+    return HeapValueGetContext(Status::MemoryLimit("Failed to allocate memory"),
+                               ikey.sequence, hvi, nullptr,
+                               {nullptr, std::free});
+  }
   auto f = heap_file_->GetHeapValueAsync(
       io_engine, UringIoOptions(), hvi.extent_number(), hvi.block_offset(),
       hvi.block_cnt(), static_cast<uint8_t*>(ptr));
@@ -140,10 +144,8 @@ auto CFHeapStorage::GetHeapValue(const ReadOptions& ro,
 
 auto CFHeapStorage::WaitAsyncGet(const ReadOptions& ro, HeapValueGetContext ctx,
                                  PinnableSlice* value) -> Status {
-  Status s;
-  if (ctx.IsEmptyCtx()) {
-    // no io due to read_tier option
-    s = Status::Incomplete("Cannot read blob(s): no disk I/O allowed");
+  Status s = ctx.status();
+  if (!s.ok()) {
     return s;
   }
   if (!ctx.cache_guard_.IsEmpty()) {

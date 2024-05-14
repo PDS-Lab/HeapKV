@@ -58,6 +58,8 @@ if(NOT CMAKE_BUILD_TYPE)
     "Default BUILD_TYPE is ${default_build_type}" FORCE)
 endif()
 
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+
 find_program(CCACHE_FOUND ccache)
 if(CCACHE_FOUND)
   set_property(GLOBAL PROPERTY RULE_LAUNCH_COMPILE ccache)

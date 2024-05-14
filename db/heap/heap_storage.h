@@ -75,6 +75,7 @@ class HeapValueGetContext {
   friend class CFHeapStorage;
 
  private:
+  Status status_;
   SequenceNumber seq_;
   HeapValueIndex hvi_;
   // will be set if cache hit
@@ -83,6 +84,14 @@ class HeapValueGetContext {
   std::unique_ptr<uint8_t[], decltype(std::free)*> buffer_;
 
  public:
+  HeapValueGetContext(Status s, SequenceNumber seq, HeapValueIndex hvi,
+                      std::unique_ptr<UringCmdFuture> future,
+                      std::unique_ptr<uint8_t[], decltype(std::free)*> buffer)
+      : status_(s),
+        seq_(seq),
+        hvi_(hvi),
+        future_(std::move(future)),
+        buffer_(std::move(buffer)) {}
   HeapValueGetContext(SequenceNumber seq, HeapValueIndex hvi,
                       std::unique_ptr<UringCmdFuture> future,
                       std::unique_ptr<uint8_t[], decltype(std::free)*> buffer)
@@ -95,9 +104,7 @@ class HeapValueGetContext {
   HeapValueGetContext(HeapValueGetContext&&) = default;
   HeapValueGetContext& operator=(HeapValueGetContext&&) = default;
   ~HeapValueGetContext() = default;
-  bool IsEmptyCtx() {
-    return future_ == nullptr && buffer_ == nullptr && cache_guard_.IsEmpty();
-  }
+  Status status() { return status_; }
   void SetCacheHandle(Cache* cache, Cache::Handle* handle) {
     cache_guard_ = CacheHandleGuard<HeapValueCacheData>(cache, handle);
   }

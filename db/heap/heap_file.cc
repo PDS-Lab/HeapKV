@@ -6,6 +6,7 @@
 
 #include "db/heap/io_engine.h"
 #include "db/heap/utils.h"
+#include "fcntl.h"
 #include "port/port_posix.h"
 #include "rocksdb/status.h"
 #include "util/mutexlock.h"
@@ -130,10 +131,10 @@ auto HeapFile::Open(UringIoEngine *io_engine, const std::string &filename,
   return Status::OK();
 }
 
-auto HeapFile::Stat(UringIoEngine *io_engine, struct statx *statxbuf)
-    -> Status {
+auto HeapFile::Stat(UringIoEngine *io_engine,
+                    struct statx *statxbuf) -> Status {
   auto f = io_engine->Statx(UringIoOptions(), fd_, "", AT_EMPTY_PATH,
-                            STATX_BASIC_STATS | STATX_DIOALIGN, statxbuf);
+                            STATX_BASIC_STATS, statxbuf);
   f->Wait();
   if (f->Result() < 0) {
     return Status::IOError("stat failed", strerror(-f->Result()));

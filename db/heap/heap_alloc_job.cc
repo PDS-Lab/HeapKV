@@ -5,6 +5,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <cstdlib>
 #include <cstring>
 #include <memory>
 #include <vector>
@@ -41,8 +42,11 @@ HeapAllocJob::~HeapAllocJob() {
 Status HeapAllocJob::InitJob() {
   io_engine_->RegisterFiles(&fd_, 1);
   registered_ = true;
-  posix_memalign(reinterpret_cast<void**>(&current_batch_.buffer_), 4096,
-                 kBufferSize);
+  current_batch_.buffer_ =
+      static_cast<uint8_t*>(std::aligned_alloc(4096, kBufferSize));
+  if (current_batch_.buffer_ != nullptr) {
+    return Status::MemoryLimit("cannot allocate buffer");
+  }
   return Status::OK();
 }
 
@@ -77,8 +81,10 @@ Status HeapAllocJob::Add(const Slice& key, const Slice& value,
                         kNoCompression);
   if (UNLIKELY(value.size() > kBufferSize)) {
     SubmitValueInBuffer();
-    void* ptr = nullptr;
-    posix_memalign(&ptr, 4096, aligned_value_size);
+    void* ptr = std::aligned_alloc(4096, aligned_value_size);
+    if (ptr == nullptr) {
+      return Status::MemoryLimit("cannot allocate buffer");
+    }
     memcpy(ptr, value.data(), value.size());
     auto f = ext_mgr_->heap_file()->PutHeapValueAsync(
         io_engine_, UringIoOptions(IOSQE_FIXED_FILE), ctx_.current_ext_id_,
@@ -251,8 +257,11 @@ Status HeapAllocJob::SwitchBuffer() {
   } else {
     previous_batch_.buffer_ = current_batch_.buffer_;
     previous_batch_.io_reqs_.swap(current_batch_.io_reqs_);
-    posix_memalign(reinterpret_cast<void**>(&current_batch_.buffer_), 4096,
-                   kBufferSize);
+    current_batch_.buffer_ =
+        static_cast<uint8_t*>(std::aligned_alloc(4096, kBufferSize));
+    if (current_batch_.buffer_ == nullptr) {
+      return Status::MemoryLimit("cannot allocate buffer");
+    }
   }
   buffer_offset_ = 0;
   return s;

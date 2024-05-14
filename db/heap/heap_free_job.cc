@@ -1,5 +1,6 @@
 #include "db/heap/heap_free_job.h"
 
+#include <fcntl.h>
 #include <liburing/io_uring.h>
 
 #include <cassert>
