@@ -272,6 +272,11 @@ const std::vector<std::pair<Tickers, std::string>> TickersNameMap = {
      "rocksdb.compressed.secondary.cache.promotions"},
     {COMPRESSED_SECONDARY_CACHE_PROMOTION_SKIPS,
      "rocksdb.compressed.secondary.cache.promotion.skips"},
+    {HEAPKV_ALLOC_JOB_BYTES_READ, "rocksdb.heapkv.alloc.job.bytes.read"},
+    {HEAPKV_ALLOC_JOB_BYTES_WRITE, "rocksdb.heapkv.alloc.job.bytes.write"},
+    {HEAPKV_FREE_JOB_BYTES_READ, "rocksdb.heapkv.free.job.bytes.read"},
+    {HEAPKV_FREE_JOB_BYTES_WRITE, "rocksdb.heapkv.free.job.bytes.write"},
+    {HEAPKV_USER_BYTES_READ, "rocksdb.heapkv.user.bytes.read"},
 };
 
 const std::vector<std::pair<Histograms, std::string>> HistogramsNameMap = {

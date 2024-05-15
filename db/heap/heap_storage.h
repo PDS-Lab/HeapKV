@@ -162,7 +162,7 @@ class CFHeapStorage {
   auto NewFreeJob(std::vector<HeapGarbageCollector::GarbageBlocks> garbage)
       -> std::unique_ptr<HeapFreeJob> {
     return std::make_unique<HeapFreeJob>(
-        next_job_id_.fetch_add(1, std::memory_order_relaxed),
+        next_job_id_.fetch_add(1, std::memory_order_relaxed), cfd_,
         extent_manager_.get(), std::move(garbage));
   }
 

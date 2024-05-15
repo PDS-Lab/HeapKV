@@ -16,6 +16,7 @@
 #include "db/heap/io_engine.h"
 #include "db/heap/utils.h"
 #include "port/likely.h"
+#include "rocksdb/statistics.h"
 #include "rocksdb/status.h"
 
 namespace ROCKSDB_NAMESPACE {
@@ -91,6 +92,7 @@ Status HeapAllocJob::Add(const Slice& key, const Slice& value,
         offset, need_block, static_cast<uint8_t*>(ptr), 0);
     IoReq req(std::move(f), reinterpret_cast<uint8_t*>(ptr), true);
     current_batch_.io_reqs_.emplace_back(std::move(req));
+    ReadWriteTick(false, aligned_value_size);
     return Status::OK();
   }
 
@@ -148,6 +150,7 @@ Status HeapAllocJob::Finish(bool commit) {
       auto f = ext_mgr_->heap_file()->WriteExtentHeaderAsync(
           io_engine_, UringIoOptions(IOSQE_FIXED_FILE), ext_id, *bitmap, 0);
       futures.push_back(std::move(f));
+      ReadWriteTick(false, kExtentHeaderSize);
     }
     for (auto& f : futures) {
       f->Wait();
@@ -199,6 +202,7 @@ Status HeapAllocJob::GetNewFreeExtent() {
       allocator_.Init(kBitmapSize, bm->Bitmap());
       locked_exts_.emplace(ctx_.current_ext_id_, std::move(bm));
     }
+    ReadWriteTick(true, kExtentHeaderSize);
     return s;
   }
   ext = ext_mgr_->AllocNewExtent();
@@ -219,6 +223,7 @@ Status HeapAllocJob::GetNewFreeExtent() {
     allocator_.Init(kBitmapSize, bm->Bitmap(), true);
     locked_exts_.emplace(ctx_.current_ext_id_, std::move(bm));
   }
+  ReadWriteTick(false, kExtentHeaderSize);
   return s;
 }
 
@@ -232,6 +237,7 @@ void HeapAllocJob::SubmitValueInBuffer() {
       ctx_.base_bno_, ctx_.cnt_, current_batch_.buffer_ + off_in_buffer, 0);
   IoReq req(std::move(f), current_batch_.buffer_ + off_in_buffer, false);
   current_batch_.io_reqs_.emplace_back(std::move(req));
+  ReadWriteTick(false, ctx_.cnt_ * kHeapFileBlockSize);
   ctx_.base_bno_ = 0;
   ctx_.cnt_ = 0;
 }
@@ -265,6 +271,14 @@ Status HeapAllocJob::SwitchBuffer() {
   }
   buffer_offset_ = 0;
   return s;
+}
+
+void HeapAllocJob::ReadWriteTick(bool read, size_t size) {
+  if (read) {
+    RecordTick(cfd_->ioptions()->stats, HEAPKV_ALLOC_JOB_BYTES_READ, size);
+  } else {
+    RecordTick(cfd_->ioptions()->stats, HEAPKV_ALLOC_JOB_BYTES_WRITE, size);
+  }
 }
 
 }  // namespace heapkv

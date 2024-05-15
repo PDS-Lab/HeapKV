@@ -12,6 +12,8 @@
 #include "db/heap/bitmap_allocator.h"
 #include "db/heap/heap_file.h"
 #include "db/heap/io_engine.h"
+#include "monitoring/statistics_impl.h"
+#include "rocksdb/statistics.h"
 #include "rocksdb/status.h"
 
 namespace ROCKSDB_NAMESPACE {
@@ -41,6 +43,7 @@ Status HeapFreeJob::Run() {
         io_engine_, UringIoOptions(IOSQE_FIXED_FILE), ext, bm.get(), 0);
     buffers.push_back(std::move(bm));
     futures.push_back(std::move(f));
+    ReadWriteTick(true, kExtentHeaderSize);
   }
   std::vector<HoleToPunch> holes;
   size_t pos = 0;
@@ -78,6 +81,7 @@ Status HeapFreeJob::Run() {
           io_engine_, UringIoOptions(IOSQE_FIXED_FILE), extents[i], *buffers[i],
           0);
       futures.push_back(std::move(f));
+      ReadWriteTick(false, kExtentHeaderSize);
     }
     for (auto hole : holes) {
       auto f = io_engine_->Fallocate(UringIoOptions(IOSQE_FIXED_FILE), 0,
@@ -133,6 +137,14 @@ HeapFreeJob::HoleToPunch HeapFreeJob::HoleToPunchAfterFree(
     hole.size_ += 4 * 8 * kHeapFileBlockSize;
   }
   return hole;
+}
+
+void HeapFreeJob::ReadWriteTick(bool read, size_t size) {
+  if (read) {
+    RecordTick(cfd_->ioptions()->stats, HEAPKV_FREE_JOB_BYTES_READ, size);
+  } else {
+    RecordTick(cfd_->ioptions()->stats, HEAPKV_FREE_JOB_BYTES_WRITE, size);
+  }
 }
 
 }  // namespace heapkv

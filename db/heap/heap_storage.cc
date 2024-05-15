@@ -13,7 +13,9 @@
 #include "db/heap/io_engine.h"
 #include "logging/logging.h"
 #include "memory/memory_allocator_impl.h"
+#include "monitoring/statistics_impl.h"
 #include "rocksdb/cache.h"
+#include "rocksdb/statistics.h"
 #include "rocksdb/status.h"
 #include "util/mutexlock.h"
 
@@ -128,6 +130,8 @@ auto CFHeapStorage::GetHeapValueAsync(
   auto f = heap_file_->GetHeapValueAsync(
       io_engine, UringIoOptions(), hvi.extent_number(), hvi.block_offset(),
       hvi.block_cnt(), static_cast<uint8_t*>(ptr));
+  RecordTick(cfd_->ioptions()->stats, HEAPKV_USER_BYTES_READ,
+             hvi.block_cnt() * kHeapFileBlockSize);
   return HeapValueGetContext(ikey.sequence, hvi, std::move(f),
                              std::unique_ptr<uint8_t[], decltype(std::free)*>(
                                  static_cast<uint8_t*>(ptr), std::free));

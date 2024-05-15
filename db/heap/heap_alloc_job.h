@@ -89,6 +89,7 @@ class HeapAllocJob {
   Status GetNewFreeExtent();
   void SubmitValueInBuffer();
   Status SwitchBuffer();
+  void ReadWriteTick(bool read, size_t size);
 };
 
 }  // namespace heapkv
