@@ -56,6 +56,10 @@ Status HeapFreeJob::Run() {
                           strerror(-futures[i]->Result()));
       break;
     }
+    if (!buffers[i]->VerifyChecksum()) {
+      s = Status::Corruption("extent header checksum mismatch");
+      break;
+    }
     while (pos < dropped_blocks_.size() &&
            dropped_blocks_[pos].extent_number_ == eid) {
       UnSetBitMap(buffers[i]->Bitmap(), dropped_blocks_[pos].block_offset_,

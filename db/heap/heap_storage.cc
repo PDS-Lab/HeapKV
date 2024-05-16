@@ -63,6 +63,10 @@ Status CFHeapStorage::OpenOrCreate(
                               strerror(-inflight.front().second->Result()));
           return;
         }
+        if (!inflight.front().first->VerifyChecksum()) {
+          s = Status::Corruption("extent header checksum mismatch");
+          return;
+        }
         extents[pos].extent_number_ = pos;
         extents[pos].approximate_free_bits_ =
             BitMapAllocator::CalcApproximateFreeBits(
