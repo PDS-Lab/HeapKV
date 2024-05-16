@@ -126,9 +126,6 @@ Status HeapAllocJob::Finish(bool commit) {
     if (req.future_->Result() < 0) {
       s = Status::IOError("write failed", strerror(-req.future_->Result()));
     }
-    if (req.owned_buffer_) {
-      free(req.buffer_);
-    }
   };
   for (auto& req : previous_batch_.io_reqs_) {
     wait_fn(req);
@@ -250,9 +247,6 @@ Status HeapAllocJob::SwitchBuffer() {
       req.future_->Wait();
       if (req.future_->Result() < 0) {
         s = Status::IOError("write failed", strerror(-req.future_->Result()));
-      }
-      if (req.owned_buffer_) {
-        free(req.buffer_);
       }
     }
     previous_batch_.io_reqs_.clear();

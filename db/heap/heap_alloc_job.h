@@ -39,6 +39,11 @@ class HeapAllocJob {
         : future_(std::move(future)),
           buffer_(buffer),
           owned_buffer_(owned_buffer) {}
+    ~IoReq() {
+      if (owned_buffer_) {
+        free(buffer_);
+      }
+    }
     IoReq(const IoReq&) = delete;
     IoReq& operator=(const IoReq&) = delete;
     IoReq(IoReq&&) = default;

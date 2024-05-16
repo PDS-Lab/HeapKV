@@ -65,10 +65,12 @@ void ExtentManager::LockExtent(ext_id_t extent_number) {
     auto latch_it = latch_.find(extent_number);
     if (latch_it != latch_.end()) {
       latch_it->second.emplace_back(&released, &cv);
+      // we cannot access latch_it since here
       while (!released.load(std::memory_order_acquire)) {
         cv.Wait();
       }
       // waker pop the cv from the latch
+      return;
     } else {
       latch_.emplace(extent_number, decltype(latch_)::mapped_type());
       return;
