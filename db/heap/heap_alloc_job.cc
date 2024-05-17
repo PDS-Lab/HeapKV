@@ -156,6 +156,9 @@ Status HeapAllocJob::Finish(bool commit) {
       if (f->Result() < 0) {
         s = Status::IOError("write failed", strerror(-f->Result()));
       }
+      if (f->Result() != kExtentHeaderSize) {
+        s = Status::IOError("extent header size mismatch");
+      }
     }
   }
   // 3. fsync

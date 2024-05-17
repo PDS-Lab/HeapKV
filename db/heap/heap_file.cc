@@ -192,6 +192,9 @@ auto HeapFile::WriteExtentHeader(UringIoEngine *io_engine,
   if (f->Result() < 0) {
     return Status::IOError("write failed", strerror(-f->Result()));
   }
+  if (f->Result() != kExtentHeaderSize) {
+    return Status::IOError("extent header size mismatch");
+  }
   return Status::OK();
 }
 

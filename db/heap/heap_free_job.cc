@@ -106,6 +106,9 @@ Status HeapFreeJob::Run() {
         s = Status::IOError("Failed to write extent header or punch hole",
                             strerror(-f->Result()));
       }
+      if (f->Result() != kExtentHeaderSize) {
+        s = Status::IOError("extent header size mismatch");
+      }
     }
     futures.clear();
   }
@@ -138,7 +141,7 @@ HeapFreeJob::HoleToPunch HeapFreeJob::HoleToPunchAfterFree(
   size_t start_4bytes = start_byte / 4;
   size_t end_4bytes = end_byte / 4;
   HoleToPunch hole;
-  hole.off_ = ExtentDataOffset(ext_id, start_byte * 8);
+  hole.off_ = ExtentDataOffset(ext_id, start_4bytes * 4 * 8);
   for (size_t i = start_4bytes; i <= end_4bytes; i++) {
     const uint32_t *ptr = reinterpret_cast<const uint32_t *>(bm.Bitmap());
     if (ptr[i] != 0) {
