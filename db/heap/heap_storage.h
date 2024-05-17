@@ -6,6 +6,7 @@
 #include <cstdlib>
 #include <memory>
 #include <unordered_map>
+#include <unordered_set>
 
 #include "cache/cache_helpers.h"
 #include "cache/cache_key.h"
@@ -111,7 +112,7 @@ class HeapValueGetContext {
 };
 
 class CFHeapStorage {
- private:
+ public:
   struct PendingHeapFreeJob {
     uint8_t count_down_;
     std::vector<HeapGarbageCollector::GarbageBlocks> garbage_;
@@ -120,6 +121,8 @@ class CFHeapStorage {
         : count_down_(count_down), garbage_(std::move(garbage)) {}
   };
   struct HeapFreeArg {
+    DBImpl* db_;
+    ColumnFamilyData* cfd_;
     CFHeapStorage* storage_;
     std::vector<HeapGarbageCollector::GarbageBlocks> garbage_;
   };
@@ -127,14 +130,17 @@ class CFHeapStorage {
  private:
   const ColumnFamilyData* cfd_;
   CacheKey base_key_;
-  std::atomic_uint64_t next_job_id_{0};
+  bool stop_{false};
+  uint64_t next_job_id_{0};
   std::shared_ptr<Cache> heap_value_cache_;
   std::unique_ptr<HeapFile> heap_file_;
   std::unique_ptr<ExtentManager> extent_manager_;
 
   port::Mutex mu_;
+  port::CondVar cv_;
   std::unordered_map<uint64_t, std::shared_ptr<PendingHeapFreeJob>>
       pending_free_jobs_;
+  std::unordered_set<uint64_t> running_jobs_;
 
  public:
   CFHeapStorage(ColumnFamilyData* cfd, std::shared_ptr<Cache> heap_value_cache,
@@ -143,34 +149,46 @@ class CFHeapStorage {
       : cfd_(cfd),
         heap_value_cache_(std::move(heap_value_cache)),
         heap_file_(std::move(heap_file)),
-        extent_manager_(std::move(extent_manager)) {
+        extent_manager_(std::move(extent_manager)),
+        cv_(&mu_) {
     if (heap_value_cache_ != nullptr) {
       base_key_ =
           CacheKey::CreateUniqueForCacheLifetime(heap_value_cache_.get());
     }
   }
+  ~CFHeapStorage() { WaitAllJobDone(); }
 
   static Status OpenOrCreate(const std::string& db_name, ColumnFamilyData* cfd,
                              std::unique_ptr<CFHeapStorage>* storage_handle);
 
   auto NewAllocJob() -> std::unique_ptr<HeapAllocJob> {
-    return std::make_unique<HeapAllocJob>(
-        next_job_id_.fetch_add(1, std::memory_order_relaxed), cfd_,
-        extent_manager_.get());
+    uint64_t jid;
+    {
+      MutexLock lg(&mu_);
+      jid = next_job_id_++;
+      running_jobs_.insert(jid);
+    }
+    return std::make_unique<HeapAllocJob>(jid, cfd_, extent_manager_.get());
   }
 
   auto NewFreeJob(std::vector<HeapGarbageCollector::GarbageBlocks> garbage)
       -> std::unique_ptr<HeapFreeJob> {
-    return std::make_unique<HeapFreeJob>(
-        next_job_id_.fetch_add(1, std::memory_order_relaxed), cfd_,
-        extent_manager_.get(), std::move(garbage));
+    uint64_t jid;
+    {
+      MutexLock lg(&mu_);
+      jid = next_job_id_++;
+      running_jobs_.insert(jid);
+    }
+    return std::make_unique<HeapFreeJob>(jid, cfd_, extent_manager_.get(),
+                                         std::move(garbage));
   }
 
   void CommitGarbageBlocks(
       const Compaction& compaction,
       std::vector<HeapGarbageCollector::GarbageBlocks> garbage);
 
-  void NotifyFileDeletion(uint64_t file_number);
+  auto NotifyFileDeletion(uint64_t file_number)
+      -> std::shared_ptr<PendingHeapFreeJob>;
 
   auto GetHeapValueAsync(const ReadOptions& ro, UringIoEngine* io_engine,
                          const ParsedInternalKey& ikey,
@@ -180,14 +198,15 @@ class CFHeapStorage {
                     PinnableSlice* value) -> Status;
   auto WaitAsyncGet(const ReadOptions& ro, HeapValueGetContext ctx,
                     PinnableSlice* value) -> Status;
+  void NotifyJobDone(uint64_t job_id);
+  void MarkStop();
+  void WaitAllJobDone();
 
  private:
   auto NewCacheKey(SequenceNumber seq, const HeapValueIndex& hvi)
       -> HeapValueCacheKey {
     return HeapValueCacheKey(base_key_, seq, hvi);
   }
-
-  static void BGWorkHeapFreeJob(void* arg);
 };
 
 }  // namespace heapkv

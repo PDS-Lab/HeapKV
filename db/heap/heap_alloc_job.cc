@@ -12,6 +12,7 @@
 
 #include "db/heap/bitmap_allocator.h"
 #include "db/heap/heap_file.h"
+#include "db/heap/heap_storage.h"
 #include "db/heap/heap_value_index.h"
 #include "db/heap/io_engine.h"
 #include "db/heap/utils.h"
@@ -38,6 +39,7 @@ HeapAllocJob::~HeapAllocJob() {
     io_engine_->UnregisterFiles();
     registered_ = false;
   }
+  cfd_->heap_storage()->NotifyJobDone(job_id_);
 }
 
 Status HeapAllocJob::InitJob() {
@@ -45,7 +47,7 @@ Status HeapAllocJob::InitJob() {
   registered_ = true;
   current_batch_.buffer_ =
       static_cast<uint8_t*>(std::aligned_alloc(4096, kBufferSize));
-  if (current_batch_.buffer_ != nullptr) {
+  if (current_batch_.buffer_ == nullptr) {
     return Status::MemoryLimit("cannot allocate buffer");
   }
   return Status::OK();

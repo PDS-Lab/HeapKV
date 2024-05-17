@@ -75,6 +75,7 @@ class UringIoEngine {
  public:
   constexpr static size_t kRingDepth = 1024;
   constexpr static size_t kPollBatchSize = 32;
+  inline static uint32_t kMaxWrk[2]{1, 2};
   friend std::unique_ptr<UringIoEngine> std::make_unique<UringIoEngine>();
 
  private:
@@ -100,6 +101,12 @@ class UringIoEngine {
     int ret = io_uring_queue_init(kRingDepth, &engine->ring_, 0);
     if (ret < 0) {
       std::cerr << "io_uring_queue_init failed: " << ret << " "
+                << strerror(-ret) << std::endl;
+      return nullptr;
+    }
+    ret = io_uring_register_iowq_max_workers(&engine->ring_, kMaxWrk);
+    if (ret < 0) {
+      std::cerr << "io_uring_register_iowq_max_workers failed: " << ret << " "
                 << strerror(-ret) << std::endl;
       return nullptr;
     }

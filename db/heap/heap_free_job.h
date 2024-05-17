@@ -29,6 +29,7 @@ class HeapFreeJob {
         io_engine_(GetThreadLocalIoEngine()),
         extent_manager_(extent_manager),
         dropped_blocks_(std::move(dropped_blocks)) {}
+  ~HeapFreeJob();
   Status Run();
 
  private:

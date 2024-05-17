@@ -8,6 +8,7 @@
 #include "cache/cache_helpers.h"
 #include "cache/typed_cache.h"
 #include "db/compaction/compaction.h"
+#include "db/db_impl/db_impl.h"
 #include "db/heap/bitmap_allocator.h"
 #include "db/heap/heap_file.h"
 #include "db/heap/io_engine.h"
@@ -81,14 +82,16 @@ Status CFHeapStorage::OpenOrCreate(
     }
   };
 
-  for (uint32_t i = 0; i < num_exts; i++) {
+  for (uint32_t i = 0; i < num_exts && s.ok(); i++) {
     auto bm = std::make_unique<ExtentBitmap>();
     auto f = heap_file->ReadExtentHeaderAsync(io_engine, UringIoOptions(), i,
                                               bm.get());
     inflight.emplace_back(std::move(bm), std::move(f));
     update_fn(false);
   }
-  update_fn(true);
+  if (s.ok()) {
+    update_fn(true);
+  }
   if (!s.ok()) {
     return s;
   }
@@ -242,38 +245,39 @@ void CFHeapStorage::CommitGarbageBlocks(
   }
 }
 
-void CFHeapStorage::NotifyFileDeletion(uint64_t file_number) {
+auto CFHeapStorage::NotifyFileDeletion(uint64_t file_number)
+    -> std::shared_ptr<PendingHeapFreeJob> {
   std::shared_ptr<PendingHeapFreeJob> job = nullptr;
   {
     MutexLock lg(&mu_);
     auto it = pending_free_jobs_.find(file_number);
     if (it != pending_free_jobs_.end()) {
-      if (--it->second->count_down_ == 0) {
+      if (--it->second->count_down_ == 0 && !stop_) {
         job = std::move(it->second);
       }
       pending_free_jobs_.erase(it);
     }
   }
-  if (job) {
-    auto arg = new HeapFreeArg;
-    arg->storage_ = this;
-    arg->garbage_.swap(job->garbage_);
-    cfd_->ioptions()->env->Schedule(&BGWorkHeapFreeJob, arg);
+  return job;
+}
+
+void CFHeapStorage::NotifyJobDone(uint64_t job_id) {
+  MutexLock lg(&mu_);
+  running_jobs_.erase(job_id);
+  cv_.SignalAll();
+}
+
+void CFHeapStorage::WaitAllJobDone() {
+  MutexLock lg(&mu_);
+  // TODO(wnj): handle pending jobs
+  while (!running_jobs_.empty()) {
+    cv_.Wait();
   }
 }
 
-void CFHeapStorage::BGWorkHeapFreeJob(void* arg) {
-  auto heap_free_arg = reinterpret_cast<HeapFreeArg*>(arg);
-  Status s =
-      heap_free_arg->storage_->NewFreeJob(std::move(heap_free_arg->garbage_))
-          ->Run();
-  if (!s.ok()) {
-    // log error
-    ROCKS_LOG_ERROR(heap_free_arg->storage_->cfd_->ioptions()->info_log,
-                    "Failed to execute heap free job: %s",
-                    s.ToString().c_str());
-  }
-  delete heap_free_arg;
+void CFHeapStorage::MarkStop() {
+  MutexLock lg(&mu_);
+  stop_ = true;
 }
 
 }  // namespace heapkv

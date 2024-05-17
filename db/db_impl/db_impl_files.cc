@@ -403,7 +403,13 @@ void DBImpl::DeleteObsoleteFileImpl(int job_id, const std::string& fname,
         continue;
       }
       if (cfd->heap_storage()) {
-        cfd->heap_storage()->NotifyFileDeletion(number);
+        auto job = cfd->heap_storage()->NotifyFileDeletion(number);
+        if (job != nullptr) {
+          auto arg = new heapkv::CFHeapStorage::HeapFreeArg{
+              this, cfd, cfd->heap_storage(), std::move(job->garbage_)};
+          env_->Schedule(&BGWorkHeapFreeJob, arg);
+          bg_heap_free_scheduled_++;
+        }
       }
     }
     mutex_.Unlock();

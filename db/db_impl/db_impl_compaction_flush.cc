@@ -13,6 +13,8 @@
 #include "db/db_impl/db_impl.h"
 #include "db/error_handler.h"
 #include "db/event_helpers.h"
+#include "db/heap/heap_free_job.h"
+#include "db/heap/heap_storage.h"
 #include "file/sst_file_manager_impl.h"
 #include "logging/logging.h"
 #include "monitoring/iostats_context_imp.h"
@@ -3082,6 +3084,25 @@ void DBImpl::BGWorkPurge(void* db) {
   TEST_SYNC_POINT("DBImpl::BGWorkPurge:start");
   reinterpret_cast<DBImpl*>(db)->BackgroundCallPurge();
   TEST_SYNC_POINT("DBImpl::BGWorkPurge:end");
+}
+
+void DBImpl::BGWorkHeapFreeJob(void* arg) {
+  auto heap_free_arg =
+      reinterpret_cast<heapkv::CFHeapStorage::HeapFreeArg*>(arg);
+  Status s =
+      heap_free_arg->storage_->NewFreeJob(std::move(heap_free_arg->garbage_))
+          ->Run();
+  if (!s.ok()) {
+    // log error
+    ROCKS_LOG_ERROR(heap_free_arg->cfd_->ioptions()->info_log,
+                    "Failed to execute heap free job: %s",
+                    s.ToString().c_str());
+  }
+  heap_free_arg->db_->mutex_.Lock();
+  heap_free_arg->db_->bg_heap_free_scheduled_--;
+  heap_free_arg->db_->bg_cv_.SignalAll();
+  heap_free_arg->db_->mutex_.Unlock();
+  delete heap_free_arg;
 }
 
 void DBImpl::UnscheduleCompactionCallback(void* arg) {

@@ -163,6 +163,8 @@ auto HeapFile::ReadExtentHeader(UringIoEngine *io_engine,
   f->Wait();
   if (f->Result() < 0) {
     return Status::IOError("read failed", strerror(-f->Result()));
+  } else if (f->Result() != kExtentHeaderSize) {
+    return Status::IOError("extent header size mismatch");
   } else if (!bitmap->VerifyChecksum()) {
     return Status::Corruption("extent header checksum mismatch");
   }

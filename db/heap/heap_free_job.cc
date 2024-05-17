@@ -11,6 +11,7 @@
 
 #include "db/heap/bitmap_allocator.h"
 #include "db/heap/heap_file.h"
+#include "db/heap/heap_storage.h"
 #include "db/heap/io_engine.h"
 #include "monitoring/statistics_impl.h"
 #include "rocksdb/statistics.h"
@@ -18,6 +19,8 @@
 
 namespace ROCKSDB_NAMESPACE {
 namespace heapkv {
+
+HeapFreeJob::~HeapFreeJob() { cfd_->heap_storage()->NotifyJobDone(job_id_); }
 
 Status HeapFreeJob::Run() {
   int fd = extent_manager_->heap_file()->fd();
@@ -55,6 +58,9 @@ Status HeapFreeJob::Run() {
       s = Status::IOError("Failed to read extent header",
                           strerror(-futures[i]->Result()));
       break;
+    }
+    if (futures[i]->Result() != kExtentHeaderSize) {
+      s = Status::Corruption("extent header size mismatch");
     }
     if (!buffers[i]->VerifyChecksum()) {
       s = Status::Corruption("extent header checksum mismatch");
