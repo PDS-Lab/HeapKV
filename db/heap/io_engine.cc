@@ -77,7 +77,7 @@ auto UringIoEngine::OpenAt(const UringIoOptions opts, int dfd, const char* path,
   while (nullptr == (handle = GetFreeHandle())) {
     PollCq(true);
   }
-  auto future = std::make_unique<UringCmdFuture>(this);
+  auto future = std::make_unique<UringCmdFuture>(this, UringIoType::Open);
   handle->future = future.get();
   handle->type = UringIoType::Open;
   io_uring_sqe* sqe = io_uring_get_sqe(&ring_);
@@ -92,7 +92,7 @@ auto UringIoEngine::Close(const UringIoOptions opts,
   while (nullptr == (handle = GetFreeHandle())) {
     PollCq(true);
   }
-  auto future = std::make_unique<UringCmdFuture>(this);
+  auto future = std::make_unique<UringCmdFuture>(this, UringIoType::Close);
   handle->future = future.get();
   handle->type = UringIoType::Close;
   io_uring_sqe* sqe = io_uring_get_sqe(&ring_);
@@ -108,7 +108,7 @@ auto UringIoEngine::Statx(const UringIoOptions opts, int dfd, const char* path,
   while (nullptr == (handle = GetFreeHandle())) {
     PollCq(true);
   }
-  auto future = std::make_unique<UringCmdFuture>(this);
+  auto future = std::make_unique<UringCmdFuture>(this, UringIoType::Statx);
   handle->future = future.get();
   handle->type = UringIoType::Statx;
   io_uring_sqe* sqe = io_uring_get_sqe(&ring_);
@@ -124,7 +124,7 @@ auto UringIoEngine::Fallocate(const UringIoOptions opts, int fd, int mode,
   while (nullptr == (handle = GetFreeHandle())) {
     PollCq(true);
   }
-  auto future = std::make_unique<UringCmdFuture>(this);
+  auto future = std::make_unique<UringCmdFuture>(this, UringIoType::Fallocate);
   handle->future = future.get();
   handle->type = UringIoType::Fallocate;
   io_uring_sqe* sqe = io_uring_get_sqe(&ring_);
@@ -140,7 +140,7 @@ auto UringIoEngine::Read(const UringIoOptions opts, int fd, void* buf,
   while (nullptr == (handle = GetFreeHandle())) {
     PollCq(true);
   }
-  auto future = std::make_unique<UringCmdFuture>(this);
+  auto future = std::make_unique<UringCmdFuture>(this, UringIoType::Read);
   handle->future = future.get();
   handle->type = UringIoType::Read;
   io_uring_sqe* sqe = io_uring_get_sqe(&ring_);
@@ -156,7 +156,7 @@ auto UringIoEngine::Write(const UringIoOptions opts, int fd, const void* buf,
   while (nullptr == (handle = GetFreeHandle())) {
     PollCq(true);
   }
-  auto future = std::make_unique<UringCmdFuture>(this);
+  auto future = std::make_unique<UringCmdFuture>(this, UringIoType::Write);
   handle->future = future.get();
   handle->type = UringIoType::Write;
   io_uring_sqe* sqe = io_uring_get_sqe(&ring_);
@@ -172,7 +172,7 @@ auto UringIoEngine::Readv(const UringIoOptions opts, int fd,
   while (nullptr == (handle = GetFreeHandle())) {
     PollCq(true);
   }
-  auto future = std::make_unique<UringCmdFuture>(this);
+  auto future = std::make_unique<UringCmdFuture>(this, UringIoType::Readv);
   handle->future = future.get();
   handle->type = UringIoType::Readv;
   io_uring_sqe* sqe = io_uring_get_sqe(&ring_);
@@ -188,7 +188,7 @@ auto UringIoEngine::Writev(const UringIoOptions opts, int fd,
   while (nullptr == (handle = GetFreeHandle())) {
     PollCq(true);
   }
-  auto future = std::make_unique<UringCmdFuture>(this);
+  auto future = std::make_unique<UringCmdFuture>(this, UringIoType::Writev);
   handle->future = future.get();
   handle->type = UringIoType::Writev;
   io_uring_sqe* sqe = io_uring_get_sqe(&ring_);
@@ -203,7 +203,7 @@ auto UringIoEngine::Fsync(const UringIoOptions opts, int fd,
   while (nullptr == (handle = GetFreeHandle())) {
     PollCq(true);
   }
-  auto future = std::make_unique<UringCmdFuture>(this);
+  auto future = std::make_unique<UringCmdFuture>(this, UringIoType::Fsync);
   handle->future = future.get();
   handle->type = UringIoType::Fsync;
   io_uring_sqe* sqe = io_uring_get_sqe(&ring_);

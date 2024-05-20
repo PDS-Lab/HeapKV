@@ -16,6 +16,7 @@
 #include "db/heap/heap_value_index.h"
 #include "db/heap/io_engine.h"
 #include "db/heap/utils.h"
+#include "logging/logging.h"
 #include "port/likely.h"
 #include "rocksdb/statistics.h"
 #include "rocksdb/status.h"
@@ -179,6 +180,10 @@ Status HeapAllocJob::Finish(bool commit) {
     });
   }
   ext_mgr_->UnlockExtents(exts, commit);
+  ROCKS_LOG_INFO(
+      cfd_->ioptions()->info_log,
+      "HeapAllocJob::Finish: job_id=%lu, extents_num=%lu, commit=%d, status=%s",
+      job_id_, exts.size(), commit, s.ToString().c_str());
   return s;
 }
 

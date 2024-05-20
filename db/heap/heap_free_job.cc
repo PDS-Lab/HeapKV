@@ -13,6 +13,7 @@
 #include "db/heap/heap_file.h"
 #include "db/heap/heap_storage.h"
 #include "db/heap/io_engine.h"
+#include "logging/logging.h"
 #include "monitoring/statistics_impl.h"
 #include "rocksdb/statistics.h"
 #include "rocksdb/status.h"
@@ -106,7 +107,7 @@ Status HeapFreeJob::Run() {
         s = Status::IOError("Failed to write extent header or punch hole",
                             strerror(-f->Result()));
       }
-      if (f->Result() != kExtentHeaderSize) {
+      if (f->Type() == UringIoType::Write && f->Result() != kExtentHeaderSize) {
         s = Status::IOError("extent header size mismatch");
       }
     }
@@ -130,6 +131,10 @@ Status HeapFreeJob::Run() {
   }
   extent_manager_->UnlockExtents(exts, true);
   io_engine_->UnregisterFiles();
+  ROCKS_LOG_INFO(
+      cfd_->ioptions()->info_log,
+      "HeapFreeJob done: job_id=%lu, extents_num=%lu, holes=%lu, status=%s",
+      job_id_, extents.size(), holes.size(), s.ToString().c_str());
   return s;
 }
 

@@ -40,15 +40,17 @@ class UringCmdFuture {
  private:
   UringIoEngine* engine_;
   std::atomic_bool done_;
+  UringIoType type_;
   int32_t res_;
   uint32_t flags_;
 
  public:
-  UringCmdFuture(UringIoEngine* engine)
-      : engine_(engine), done_(false), res_(0), flags_(0) {}
+  UringCmdFuture(UringIoEngine* engine, UringIoType type)
+      : engine_(engine), done_(false), type_(type), res_(0), flags_(0) {}
   ~UringCmdFuture() { Wait(); }
   void Wait();
   auto Done() -> bool { return done_.load(std::memory_order_acquire); }
+  auto Type() -> UringIoType { return type_; }
   auto Result() -> int32_t { return res_; }
   auto Flags() -> uint32_t { return flags_; }
 
@@ -75,7 +77,6 @@ class UringIoEngine {
  public:
   constexpr static size_t kRingDepth = 1024;
   constexpr static size_t kPollBatchSize = 32;
-  inline static uint32_t kMaxWrk[2]{1, 2};
   friend std::unique_ptr<UringIoEngine> std::make_unique<UringIoEngine>();
 
  private:
@@ -98,13 +99,17 @@ class UringIoEngine {
   UringIoEngine& operator=(const UringIoEngine&) = delete;
   static auto NewUringIoEngine() -> std::unique_ptr<UringIoEngine> {
     auto engine = std::make_unique<UringIoEngine>();
-    int ret = io_uring_queue_init(kRingDepth, &engine->ring_, 0);
+    int ret = io_uring_queue_init(kRingDepth, &engine->ring_,
+                                  IORING_SETUP_COOP_TASKRUN |
+                                      IORING_SETUP_TASKRUN_FLAG |
+                                      IORING_SETUP_SINGLE_ISSUER);
     if (ret < 0) {
       std::cerr << "io_uring_queue_init failed: " << ret << " "
                 << strerror(-ret) << std::endl;
       return nullptr;
     }
-    ret = io_uring_register_iowq_max_workers(&engine->ring_, kMaxWrk);
+    uint32_t max_wrk[2]{1, 1};
+    ret = io_uring_register_iowq_max_workers(&engine->ring_, max_wrk);
     if (ret < 0) {
       std::cerr << "io_uring_register_iowq_max_workers failed: " << ret << " "
                 << strerror(-ret) << std::endl;
