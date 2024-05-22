@@ -1,4 +1,5 @@
 #pragma once
+#include <cstddef>
 #include <cstdint>
 
 #include "db/heap/heap_file.h"
@@ -11,6 +12,9 @@ namespace ROCKSDB_NAMESPACE {
 namespace heapkv {
 
 class HeapValueIndex {
+ public:
+  static constexpr size_t IndexSize = 20;
+
  private:
   ext_id_t extent_number_{0};
   uint16_t block_offset_{0};

@@ -37,6 +37,7 @@
 #include <cassert>
 
 #include "db/dbformat.h"
+#include "db/heap/heap_value_index.h"
 #include "rocksdb/comparator.h"
 #include "table/block_based/data_block_footer.h"
 #include "util/coding.h"
@@ -48,12 +49,13 @@ BlockBuilder::BlockBuilder(
     bool use_value_delta_encoding,
     BlockBasedTableOptions::DataBlockIndexType index_type,
     double data_block_hash_table_util_ratio, size_t ts_sz,
-    bool persist_user_defined_timestamps, bool is_user_key)
+    bool persist_user_defined_timestamps, bool is_user_key, bool is_data_block)
     : block_restart_interval_(block_restart_interval),
       use_delta_encoding_(use_delta_encoding),
       use_value_delta_encoding_(use_value_delta_encoding),
       strip_ts_sz_(persist_user_defined_timestamps ? 0 : ts_sz),
       is_user_key_(is_user_key),
+      is_data_block_(is_data_block),
       restarts_(1, 0),  // First restart point is at offset 0
       counter_(0),
       finished_(false) {
@@ -68,17 +70,18 @@ BlockBuilder::BlockBuilder(
       assert(0);
   }
   assert(block_restart_interval_ >= 1);
-  estimate_ = sizeof(uint32_t) + sizeof(uint32_t);
+  estimate_ = sizeof(uint32_t) + sizeof(uint32_t) + sizeof(uint32_t);
 }
 
 void BlockBuilder::Reset() {
   buffer_.clear();
   restarts_.resize(1);  // First restart point is at offset 0
   assert(restarts_[0] == 0);
-  estimate_ = sizeof(uint32_t) + sizeof(uint32_t);
+  estimate_ = sizeof(uint32_t) + sizeof(uint32_t) + sizeof(uint32_t);
   counter_ = 0;
   finished_ = false;
   last_key_.clear();
+  heap_value_indices_.clear();
   if (data_block_hash_index_builder_.Valid()) {
     data_block_hash_index_builder_.Reset();
   }
@@ -124,6 +127,10 @@ size_t BlockBuilder::EstimateSizeAfterKV(const Slice& key,
 }
 
 Slice BlockBuilder::Finish() {
+  // Append heap value index array
+  buffer_.append(heap_value_indices_);
+  PutFixed32(&buffer_,
+             heap_value_indices_.size() / heapkv::HeapValueIndex::IndexSize);
   // Append restart array
   for (size_t i = 0; i < restarts_.size(); i++) {
     PutFixed32(&buffer_, restarts_[i]);
@@ -192,6 +199,7 @@ inline void BlockBuilder::AddWithLastKeyImpl(const Slice& key,
   assert(!finished_);
   assert(counter_ <= block_restart_interval_);
   assert(!use_value_delta_encoding_ || delta_value);
+  assert(!(use_value_delta_encoding_ && is_data_block_));
   std::string key_buf;
   std::string last_key_buf;
   const Slice key_to_persist = MaybeStripTimestampFromKey(&key_buf, key);
@@ -214,15 +222,28 @@ inline void BlockBuilder::AddWithLastKeyImpl(const Slice& key,
 
   const size_t non_shared = key_to_persist.size() - shared;
 
+  const bool split_heap_value_index =
+      is_data_block_ && !is_user_key_ &&
+      ExtractValueType(key) == kTypeHeapValueIndex;
+
   if (use_value_delta_encoding_) {
     // Add "<shared><non_shared>" to buffer_
     PutVarint32Varint32(&buffer_, static_cast<uint32_t>(shared),
                         static_cast<uint32_t>(non_shared));
   } else {
-    // Add "<shared><non_shared><value_size>" to buffer_
-    PutVarint32Varint32Varint32(&buffer_, static_cast<uint32_t>(shared),
-                                static_cast<uint32_t>(non_shared),
-                                static_cast<uint32_t>(value.size()));
+    if (!split_heap_value_index) {
+      // Add "<shared><non_shared><value_size>" to buffer_
+      PutVarint32Varint32Varint32(&buffer_, static_cast<uint32_t>(shared),
+                                  static_cast<uint32_t>(non_shared),
+                                  static_cast<uint32_t>(value.size()));
+    } else {
+      // Add "<shared><non_shared><off_in_heap_value_index>" to buffer
+      PutVarint32Varint32Varint32(
+          &buffer_, static_cast<uint32_t>(shared),
+          static_cast<uint32_t>(non_shared),
+          static_cast<uint32_t>(heap_value_indices_.size() /
+                                heapkv::HeapValueIndex::IndexSize));
+    }
   }
 
   // Add string delta to buffer_ followed by value
@@ -233,7 +254,13 @@ inline void BlockBuilder::AddWithLastKeyImpl(const Slice& key,
   if (shared != 0 && use_value_delta_encoding_) {
     buffer_.append(delta_value->data(), delta_value->size());
   } else {
-    buffer_.append(value.data(), value.size());
+    if (!split_heap_value_index) {
+      buffer_.append(value.data(), value.size());
+    } else {
+      assert(value.size() == heapkv::HeapValueIndex::IndexSize);
+      heap_value_indices_.append(value.data(), value.size());
+      estimate_ += heapkv::HeapValueIndex::IndexSize;
+    }
   }
 
   // TODO(yuzhangyu): make user defined timestamp work with block hash index.

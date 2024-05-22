@@ -31,7 +31,7 @@ class BlockBuilder {
                         double data_block_hash_table_util_ratio = 0.75,
                         size_t ts_sz = 0,
                         bool persist_user_defined_timestamps = true,
-                        bool is_user_key = false);
+                        bool is_user_key = false, bool is_data_block = false);
 
   // Reset the contents as if the BlockBuilder was just constructed.
   void Reset();
@@ -112,9 +112,11 @@ class BlockBuilder {
   // index block for partitioned index blocks. In summary, this only applies to
   // block whose key are real user keys or internal keys created from user keys.
   const bool is_user_key_;
+  const bool is_data_block_;
 
   std::string buffer_;              // Destination buffer
   std::vector<uint32_t> restarts_;  // Restart points
+  std::string heap_value_indices_;
   size_t estimate_;
   int counter_;    // Number of entries emitted since restart
   bool finished_;  // Has Finish() been called?

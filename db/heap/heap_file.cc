@@ -5,6 +5,9 @@
 #include <optional>
 
 #include "db/heap/io_engine.h"
+#ifndef NDEBUG
+#include "db/heap/utils.h"
+#endif
 #include "fcntl.h"
 #include "port/port_posix.h"
 #include "rocksdb/status.h"
