@@ -5,7 +5,6 @@
 #include <optional>
 
 #include "db/heap/io_engine.h"
-#include "db/heap/utils.h"
 #include "fcntl.h"
 #include "port/port_posix.h"
 #include "rocksdb/status.h"
