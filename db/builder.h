@@ -10,6 +10,7 @@
 #include <utility>
 #include <vector>
 
+#include "db/column_family.h"
 #include "db/range_tombstone_fragmenter.h"
 #include "db/seqno_to_time_mapping.h"
 #include "db/table_properties_collector.h"
@@ -51,7 +52,7 @@ TableBuilder* NewTableBuilder(const TableBuilderOptions& tboptions,
 // @param column_family_name Name of the column family that is also identified
 //    by column_family_id, or empty string if unknown.
 extern Status BuildTable(
-    const std::string& dbname, VersionSet* versions,
+    const std::string& dbname, VersionSet* versions, ColumnFamilyData* cfd,
     const ImmutableDBOptions& db_options, const TableBuilderOptions& tboptions,
     const FileOptions& file_options, TableCache* table_cache,
     InternalIterator* iter,

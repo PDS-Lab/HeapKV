@@ -15,6 +15,7 @@
 #include <vector>
 
 #include "db/blob/blob_file_builder.h"
+#include "db/column_family.h"
 #include "db/compaction/compaction_iterator.h"
 #include "db/dbformat.h"
 #include "db/event_helpers.h"
@@ -60,7 +61,7 @@ TableBuilder* NewTableBuilder(const TableBuilderOptions& tboptions,
 }
 
 Status BuildTable(
-    const std::string& dbname, VersionSet* versions,
+    const std::string& dbname, VersionSet* versions, ColumnFamilyData* cfd,
     const ImmutableDBOptions& db_options, const TableBuilderOptions& tboptions,
     const FileOptions& file_options, TableCache* table_cache,
     InternalIterator* iter,
@@ -201,10 +202,7 @@ Status BuildTable(
 
     std::unique_ptr<heapkv::HeapAllocJob> heap_alloc_job = nullptr;
     if (ioptions.enable_heapkv) {
-      heap_alloc_job = versions->GetColumnFamilySet()
-                           ->GetColumnFamily(tboptions.column_family_id)
-                           ->heap_storage()
-                           ->NewAllocJob();
+      heap_alloc_job = cfd->heap_storage()->NewAllocJob();
       s = heap_alloc_job->InitJob();
     }
 

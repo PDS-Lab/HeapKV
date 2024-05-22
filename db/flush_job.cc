@@ -975,7 +975,7 @@ Status FlushJob::WriteLevel0Table() {
           job_context_->GetJobSnapshotSequence();
 
       s = BuildTable(
-          dbname_, versions_, db_options_, tboptions, file_options_,
+          dbname_, versions_, cfd_, db_options_, tboptions, file_options_,
           cfd_->table_cache(), iter.get(), std::move(range_del_iters), &meta_,
           &blob_file_additions, existing_snapshots_,
           earliest_write_conflict_snapshot_, job_snapshot_seq,
