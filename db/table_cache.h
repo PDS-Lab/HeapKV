@@ -50,7 +50,7 @@ class HistogramImpl;
 // ioptions.row_cache
 class TableCache {
  public:
-  TableCache(const ImmutableOptions& ioptions,
+  TableCache(const ColumnFamilyData* cfd, const ImmutableOptions& ioptions,
              const FileOptions* storage_options, Cache* cache,
              BlockCacheTracer* const block_cache_tracer,
              const std::shared_ptr<IOTracer>& io_tracer,
@@ -275,6 +275,7 @@ class TableCache {
                        size_t prefix_size, GetContext* get_context,
                        SequenceNumber seq_no = kMaxSequenceNumber);
 
+  const ColumnFamilyData* cfd_;
   const ImmutableOptions& ioptions_;
   const FileOptions& file_options_;
   CacheInterface cache_;

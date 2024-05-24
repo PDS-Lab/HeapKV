@@ -15,6 +15,7 @@
 #include "cache/cache_entry_roles.h"
 #include "cache/cache_key.h"
 #include "cache/cache_reservation_manager.h"
+#include "db/heap/heap_storage.h"
 #include "db/range_tombstone_fragmenter.h"
 #include "file/filename.h"
 #include "rocksdb/slice_transform.h"
@@ -97,6 +98,7 @@ class BlockBasedTable : public TableReader {
       const EnvOptions& env_options,
       const BlockBasedTableOptions& table_options,
       const InternalKeyComparator& internal_key_comparator,
+      heapkv::CFHeapStorage* heap_storage,
       std::unique_ptr<RandomAccessFileReader>&& file, uint64_t file_size,
       uint8_t block_protection_bytes_per_key,
       std::unique_ptr<TableReader>* table_reader, uint64_t tail_size,
@@ -562,7 +564,8 @@ class BlockBasedTable::PartitionedIndexIteratorState
 struct BlockBasedTable::Rep {
   Rep(const ImmutableOptions& _ioptions, const EnvOptions& _env_options,
       const BlockBasedTableOptions& _table_opt,
-      const InternalKeyComparator& _internal_comparator, bool skip_filters,
+      const InternalKeyComparator& _internal_comparator,
+      heapkv::CFHeapStorage* _heap_storage, bool skip_filters,
       uint64_t _file_size, int _level, const bool _immortal_table,
       const bool _user_defined_timestamps_persisted = true)
       : ioptions(_ioptions),
@@ -570,6 +573,7 @@ struct BlockBasedTable::Rep {
         table_options(_table_opt),
         filter_policy(skip_filters ? nullptr : _table_opt.filter_policy.get()),
         internal_comparator(_internal_comparator),
+        heap_storage(_heap_storage),
         filter_type(FilterType::kNoFilter),
         index_type(BlockBasedTableOptions::IndexType::kBinarySearch),
         whole_key_filtering(_table_opt.whole_key_filtering),
@@ -585,6 +589,7 @@ struct BlockBasedTable::Rep {
   const BlockBasedTableOptions table_options;
   const FilterPolicy* const filter_policy;
   const InternalKeyComparator& internal_comparator;
+  heapkv::CFHeapStorage* heap_storage;
   Status status;
   std::unique_ptr<RandomAccessFileReader> file;
   OffsetableCacheKey base_cache_key;

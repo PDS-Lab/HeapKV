@@ -643,10 +643,11 @@ bool BlockIter<TValue>::ParseNextKey(bool* is_shared) {
   is_heap_value_index_ = false;
   current_ = NextEntryOffset();
   const char* p = data_ + current_;
-  const char* limit =
+  const char* entry_limit =
       data_ + heap_value_indices_offset_;  // hvi offsetss come right after data
+  const char* data_limit = data_ + restarts_;
 
-  if (p >= limit) {
+  if (p >= entry_limit) {
     // No more entries to return.  Mark as invalid.
     current_ = restarts_;
     restart_index_ = num_restarts_;
@@ -654,7 +655,7 @@ bool BlockIter<TValue>::ParseNextKey(bool* is_shared) {
   }
   // Decode next entry
   uint32_t shared, non_shared, hvi_offset_or_value_length;
-  p = DecodeEntryFunc()(p, limit, &shared, &non_shared,
+  p = DecodeEntryFunc()(p, data_limit, &shared, &non_shared,
                         &hvi_offset_or_value_length);
   if (p == nullptr || raw_key_.Size() < shared) {
     CorruptionError();

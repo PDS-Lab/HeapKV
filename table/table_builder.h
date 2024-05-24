@@ -37,7 +37,8 @@ struct TableReaderOptions {
       const std::shared_ptr<const SliceTransform>& _prefix_extractor,
       const EnvOptions& _env_options,
       const InternalKeyComparator& _internal_comparator,
-      uint8_t _block_protection_bytes_per_key, bool _skip_filters = false,
+      uint8_t _block_protection_bytes_per_key,
+      heapkv::CFHeapStorage* _heap_storage, bool _skip_filters = false,
       bool _immortal = false, bool _force_direct_prefetch = false,
       int _level = -1, BlockCacheTracer* const _block_cache_tracer = nullptr,
       size_t _max_file_size_for_l0_meta_pin = 0,
@@ -48,6 +49,7 @@ struct TableReaderOptions {
         prefix_extractor(_prefix_extractor),
         env_options(_env_options),
         internal_comparator(_internal_comparator),
+        heap_storage(_heap_storage),
         skip_filters(_skip_filters),
         immortal(_immortal),
         force_direct_prefetch(_force_direct_prefetch),
@@ -66,6 +68,7 @@ struct TableReaderOptions {
   const std::shared_ptr<const SliceTransform>& prefix_extractor;
   const EnvOptions& env_options;
   const InternalKeyComparator& internal_comparator;
+  heapkv::CFHeapStorage* heap_storage;
   // This is only used for BlockBasedTable (reader)
   bool skip_filters;
   // Whether the table will be valid as long as the DB is open

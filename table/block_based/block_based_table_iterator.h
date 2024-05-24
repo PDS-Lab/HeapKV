@@ -7,8 +7,10 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file. See the AUTHORS file for names of contributors.
 #pragma once
+#include <cstdint>
 #include <deque>
 
+#include "db/heap/heap_prefetch_helper.h"
 #include "table/block_based/block_based_table_reader.h"
 #include "table/block_based/block_based_table_reader_impl.h"
 #include "table/block_based/block_prefetcher.h"
@@ -39,6 +41,7 @@ class BlockBasedTableIterator : public InternalIteratorBase<Slice> {
         block_prefetcher_(
             compaction_readahead_size,
             table_->get_rep()->table_options.initial_auto_readahead_size),
+        heap_prefetcher_(read_options, table->get_rep()->heap_storage),
         allow_unprepared_value_(allow_unprepared_value),
         block_iter_points_to_real_block_(false),
         check_filter_(check_filter),
@@ -284,6 +287,7 @@ class BlockBasedTableIterator : public InternalIteratorBase<Slice> {
   BlockCacheLookupContext lookup_context_;
 
   BlockPrefetcher block_prefetcher_;
+  heapkv::HeapPrefetcher heap_prefetcher_;
 
   const bool allow_unprepared_value_;
   // True if block_iter_ is initialized and points to the same block
@@ -341,6 +345,7 @@ class BlockBasedTableIterator : public InternalIteratorBase<Slice> {
   void FindBlockForward();
   void FindKeyBackward();
   void CheckOutOfBound();
+  void PrefetchIfNeed();
 
   // Check if data block is fully within iterate_upper_bound.
   //

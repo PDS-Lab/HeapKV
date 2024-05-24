@@ -9,6 +9,7 @@
 
 #include "db/table_cache.h"
 
+#include "db/column_family.h"
 #include "db/dbformat.h"
 #include "db/range_tombstone_fragmenter.h"
 #include "db/snapshot_impl.h"
@@ -65,12 +66,14 @@ void AppendVarint64(IterKey* key, uint64_t v) {
 
 const int kLoadConcurency = 128;
 
-TableCache::TableCache(const ImmutableOptions& ioptions,
+TableCache::TableCache(const ColumnFamilyData* cfd,
+                       const ImmutableOptions& ioptions,
                        const FileOptions* file_options, Cache* const cache,
                        BlockCacheTracer* const block_cache_tracer,
                        const std::shared_ptr<IOTracer>& io_tracer,
                        const std::string& db_session_id)
-    : ioptions_(ioptions),
+    : cfd_(cfd),
+      ioptions_(ioptions),
       file_options_(*file_options),
       cache_(cache),
       immortal_tables_(false),
@@ -150,9 +153,9 @@ Status TableCache::GetTableReader(
         ro,
         TableReaderOptions(
             ioptions_, prefix_extractor, file_options, internal_comparator,
-            block_protection_bytes_per_key, skip_filters, immortal_tables_,
-            false /* force_direct_prefetch */, level, block_cache_tracer_,
-            max_file_size_for_l0_meta_pin, db_session_id_,
+            block_protection_bytes_per_key, cfd_->heap_storage(), skip_filters,
+            immortal_tables_, false /* force_direct_prefetch */, level,
+            block_cache_tracer_, max_file_size_for_l0_meta_pin, db_session_id_,
             file_meta.fd.GetNumber(), expected_unique_id,
             file_meta.fd.largest_seqno, file_meta.tail_size,
             file_meta.user_defined_timestamps_persisted),
