@@ -39,10 +39,9 @@ class HeapValueCacheKey : private CacheKey {
   [[maybe_unused]] char _reserved_[2]{0};  // pad to alignment to keep unique
 
  public:
-  HeapValueCacheKey(CacheKey cache_key, SequenceNumber seq,
-                    const HeapValueIndex& hvi)
+  HeapValueCacheKey(CacheKey cache_key, const HeapValueIndex& hvi)
       : CacheKey(cache_key),
-        seq_(seq),
+        seq_(hvi.seq_num()),
         ext_id_(hvi.extent_number()),
         block_offset_(hvi.block_offset()) {}
   HeapValueCacheKey(CacheKey cache_key, SequenceNumber seq, ext_id_t ext_id,
@@ -76,7 +75,6 @@ class HeapValueGetContext {
 
  private:
   Status status_;
-  SequenceNumber seq_;
   HeapValueIndex hvi_;
   // will be set if cache hit
   CacheHandleGuard<HeapValueCacheData> cache_guard_;
@@ -84,27 +82,25 @@ class HeapValueGetContext {
   std::unique_ptr<uint8_t[], decltype(std::free)*> buffer_;
 
  public:
-  HeapValueGetContext(Status s, SequenceNumber seq, HeapValueIndex hvi,
+  HeapValueGetContext(Status s, HeapValueIndex hvi,
                       std::unique_ptr<UringCmdFuture> future,
                       std::unique_ptr<uint8_t[], decltype(std::free)*> buffer)
       : status_(s),
-        seq_(seq),
+
         hvi_(hvi),
         future_(std::move(future)),
         buffer_(std::move(buffer)) {}
-  HeapValueGetContext(SequenceNumber seq, HeapValueIndex hvi,
+  HeapValueGetContext(HeapValueIndex hvi,
                       std::unique_ptr<UringCmdFuture> future,
                       std::unique_ptr<uint8_t[], decltype(std::free)*> buffer)
-      : seq_(seq),
-        hvi_(hvi),
-        future_(std::move(future)),
-        buffer_(std::move(buffer)) {}
+      : hvi_(hvi), future_(std::move(future)), buffer_(std::move(buffer)) {}
   HeapValueGetContext(const HeapValueGetContext&) = delete;
   HeapValueGetContext& operator=(const HeapValueGetContext&) = delete;
   HeapValueGetContext(HeapValueGetContext&&) = default;
   HeapValueGetContext& operator=(HeapValueGetContext&&) = default;
   ~HeapValueGetContext() = default;
   Status status() { return status_; }
+  const HeapValueIndex& heap_value_index() const { return hvi_; }
   void SetCacheHandle(Cache* cache, Cache::Handle* handle) {
     cache_guard_ = CacheHandleGuard<HeapValueCacheData>(cache, handle);
   }
@@ -157,6 +153,8 @@ class CFHeapStorage {
   }
   ~CFHeapStorage() { WaitAllJobDone(); }
 
+  bool HasCache() const { return heap_value_cache_ != nullptr; }
+
   static Status OpenOrCreate(const std::string& db_name, ColumnFamilyData* cfd,
                              std::unique_ptr<CFHeapStorage>* storage_handle);
 
@@ -190,11 +188,9 @@ class CFHeapStorage {
       -> std::shared_ptr<PendingHeapFreeJob>;
 
   auto GetHeapValueAsync(const ReadOptions& ro, UringIoEngine* io_engine,
-                         const ParsedInternalKey& ikey,
                          const HeapValueIndex& hvi) -> HeapValueGetContext;
   auto GetHeapValue(const ReadOptions& ro, UringIoEngine* io_engine,
-                    const ParsedInternalKey& ikey, const HeapValueIndex& hvi,
-                    PinnableSlice* value) -> Status;
+                    const HeapValueIndex& hvi, PinnableSlice* value) -> Status;
   auto WaitAsyncGet(const ReadOptions& ro, HeapValueGetContext ctx,
                     PinnableSlice* value) -> Status;
   void NotifyJobDone(uint64_t job_id);
@@ -202,9 +198,8 @@ class CFHeapStorage {
   void WaitAllJobDone();
 
  private:
-  auto NewCacheKey(SequenceNumber seq, const HeapValueIndex& hvi)
-      -> HeapValueCacheKey {
-    return HeapValueCacheKey(base_key_, seq, hvi);
+  auto NewCacheKey(const HeapValueIndex& hvi) -> HeapValueCacheKey {
+    return HeapValueCacheKey(base_key_, hvi);
   }
 };
 

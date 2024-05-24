@@ -310,8 +310,7 @@ class DBIter final : public Iterator {
     blob_value_.Reset();
   }
 
-  bool SetHeapValue(const ParsedInternalKey& ikey,
-                    const Slice& heap_value_index);
+  bool SetHeapValue(const Slice& heap_value_index);
 
   void ResetHeapValue() {
     is_heap_value_ = false;

@@ -338,16 +338,6 @@ bool GetContext::SaveValue(const ParsedInternalKey& parsed_key,
             if (type == kTypeBlobIndex && ucmp_->timestamp_size() != 0) {
               ukey_with_ts_found_.PinSelf(parsed_key.user_key);
             }
-            if (type == kTypeHeapValueIndex) {
-              if (ucmp_->timestamp_size() != 0) {
-                ukey_with_ts_found_.PinSelf(parsed_key.user_key);
-                parsed_key_for_heap_index_ = ParsedInternalKey(
-                    ukey_with_ts_found_, parsed_key.sequence, type);
-              } else {
-                parsed_key_for_heap_index_ =
-                    ParsedInternalKey(user_key_, parsed_key.sequence, type);
-              }
-            }
             if (LIKELY(pinnable_val_ != nullptr)) {
               Slice value_to_use = value;
 
@@ -394,7 +384,7 @@ bool GetContext::SaveValue(const ParsedInternalKey& parsed_key,
               push_operand(blob_value, nullptr);
             } else if (type == kTypeHeapValueIndex) {
               PinnableSlice pin_val;
-              if (GetHeapValue(parsed_key, value, &pin_val) == false) {
+              if (GetHeapValue(value, &pin_val) == false) {
                 return false;
               }
               Slice heap_value(pin_val);
@@ -435,7 +425,7 @@ bool GetContext::SaveValue(const ParsedInternalKey& parsed_key,
             }
           } else if (type == kTypeHeapValueIndex) {
             PinnableSlice pin_val;
-            if (GetHeapValue(parsed_key, value, &pin_val) == false) {
+            if (GetHeapValue(value, &pin_val) == false) {
               return false;
             }
             Slice heap_value(pin_val);
@@ -610,8 +600,7 @@ bool GetContext::GetBlobValue(const Slice& user_key, const Slice& blob_index,
   return true;
 }
 
-bool GetContext::GetHeapValue(const ParsedInternalKey& ikey,
-                              const Slice& heap_index,
+bool GetContext::GetHeapValue(const Slice& heap_index,
                               PinnableSlice* heap_value) {
   heapkv::HeapValueIndex hvi;
   Status s = hvi.DecodeFrom(heap_index);
@@ -621,7 +610,7 @@ bool GetContext::GetHeapValue(const ParsedInternalKey& ikey,
   }
 
   s = heap_storage_->GetHeapValue(
-      read_options_, heapkv::GetThreadLocalIoEngine(), ikey, hvi, heap_value);
+      read_options_, heapkv::GetThreadLocalIoEngine(), hvi, heap_value);
   if (!s.ok()) {
     if (s.IsIncomplete()) {
       MarkKeyMayExist();

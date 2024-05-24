@@ -918,7 +918,6 @@ class Version {
                  uint64_t* bytes_read) const;
 
   Status GetHeapValue(const ReadOptions& read_options,
-                      const ParsedInternalKey& ikey,
                       const Slice& heap_value_index_slice,
                       PinnableSlice* value) const;
 

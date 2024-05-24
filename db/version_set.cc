@@ -2290,7 +2290,6 @@ Status Version::GetBlob(const ReadOptions& read_options, const Slice& user_key,
 }
 
 Status Version::GetHeapValue(const ReadOptions& read_options,
-                             const ParsedInternalKey& ikey,
                              const Slice& heap_value_index_slice,
                              PinnableSlice* value) const {
   Status s;
@@ -2300,9 +2299,8 @@ Status Version::GetHeapValue(const ReadOptions& read_options,
     return s;
   }
   value->Reset();
-  s = cfd_->heap_storage()->GetHeapValue(read_options,
-                                         heapkv::GetThreadLocalIoEngine(), ikey,
-                                         heap_value_index, value);
+  s = cfd_->heap_storage()->GetHeapValue(
+      read_options, heapkv::GetThreadLocalIoEngine(), heap_value_index, value);
   return s;
 }
 
@@ -2540,9 +2538,7 @@ void Version::Get(const ReadOptions& read_options, const LookupKey& k,
               value ? *value
                     : WideColumnsHelper::GetDefaultColumn(columns->columns());
           PinnableSlice result;
-          *status =
-              GetHeapValue(read_options, get_context.ikey_to_get_heap_value(),
-                           heap_value_index, &result);
+          *status = GetHeapValue(read_options, heap_value_index, &result);
           if (!status->ok()) {
             if (status->IsIncomplete()) {
               get_context.MarkKeyMayExist();

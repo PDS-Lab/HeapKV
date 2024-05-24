@@ -225,8 +225,7 @@ bool DBIter::SetBlobValueIfNeeded(const Slice& user_key,
   return true;
 }
 
-bool DBIter::SetHeapValue(const ParsedInternalKey& ikey,
-                          const Slice& heap_value_index) {
+bool DBIter::SetHeapValue(const Slice& heap_value_index) {
   assert(!is_heap_value_);
   assert(heap_value_.empty());
 
@@ -240,8 +239,8 @@ bool DBIter::SetHeapValue(const ParsedInternalKey& ikey,
   read_options.fill_cache = fill_cache_;
   read_options.verify_checksums = verify_checksums_;
   read_options.io_activity = io_activity_;
-  const Status s = version_->GetHeapValue(read_options, ikey, heap_value_index,
-                                          &heap_value_);
+  const Status s =
+      version_->GetHeapValue(read_options, heap_value_index, &heap_value_);
   if (!s.ok()) {
     status_ = s;
     valid_ = false;
@@ -447,7 +446,7 @@ bool DBIter::FindNextUserEntryInternal(bool skipping_saved_key,
                 return false;
               }
             } else if (ikey_.type == kTypeHeapValueIndex) {
-              if (!SetHeapValue(ikey_, iter_.value())) {
+              if (!SetHeapValue(iter_.value())) {
                 return false;
               }
               SetValueAndColumnsFromPlain(heap_value_);
@@ -655,7 +654,7 @@ bool DBIter::MergeValuesNewToOld() {
       }
       return true;
     } else if (kTypeHeapValueIndex == ikey.type) {
-      if (!SetHeapValue(ikey_, iter_.value())) {
+      if (!SetHeapValue(iter_.value())) {
         return false;
       }
       valid_ = true;
@@ -1083,7 +1082,7 @@ bool DBIter::FindValueForCurrentKey() {
           valid_ = false;
           return false;
         }
-        if (!SetHeapValue(ik, pinned_value_)) {
+        if (!SetHeapValue(pinned_value_)) {
           return false;
         }
         valid_ = true;
@@ -1128,7 +1127,7 @@ bool DBIter::FindValueForCurrentKey() {
         valid_ = false;
         return false;
       }
-      if (!SetHeapValue(ik, pinned_value_)) {
+      if (!SetHeapValue(pinned_value_)) {
         return false;
       }
       SetValueAndColumnsFromPlain(heap_value_);
@@ -1242,7 +1241,7 @@ bool DBIter::FindValueForCurrentKeyUsingSeek() {
         return false;
       }
     } else if (ikey.type == kTypeHeapValueIndex) {
-      if (!SetHeapValue(ikey, pinned_value_)) {
+      if (!SetHeapValue(pinned_value_)) {
         return false;
       }
       SetValueAndColumnsFromPlain(heap_value_);
@@ -1321,7 +1320,7 @@ bool DBIter::FindValueForCurrentKeyUsingSeek() {
 
       return true;
     } else if (ikey.type == kTypeHeapValueIndex) {
-      if (!SetHeapValue(ikey, iter_.value())) {
+      if (!SetHeapValue(iter_.value())) {
         return false;
       }
       valid_ = true;

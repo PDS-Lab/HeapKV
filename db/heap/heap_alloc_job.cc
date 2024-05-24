@@ -10,6 +10,7 @@
 #include <memory>
 #include <vector>
 
+#include "db/dbformat.h"
 #include "db/heap/bitmap_allocator.h"
 #include "db/heap/heap_file.h"
 #include "db/heap/heap_storage.h"
@@ -63,6 +64,11 @@ Status HeapAllocJob::Add(const Slice& key, const Slice& value,
       return s;
     }
   }
+  ParsedInternalKey ikey;
+  s = ParseInternalKey(key, &ikey, false);
+  if (!s.ok()) {
+    return s;
+  }
 
   uint32_t aligned_value_size = align_up(value.size(), kHeapFileBlockSize);
   uint32_t need_block =
@@ -79,10 +85,10 @@ Status HeapAllocJob::Add(const Slice& key, const Slice& value,
   ctx_.allocated_ = true;
 
   uint32_t checksum = Lower32of64(XXH3_64bits(value.data_, value.size()));
-  *hvi = HeapValueIndex(ctx_.current_ext_id_, static_cast<uint16_t>(offset),
-                        static_cast<uint16_t>(need_block),
-                        static_cast<uint32_t>(value.size()), checksum,
-                        kNoCompression);
+  *hvi = HeapValueIndex(
+      ikey.sequence, ctx_.current_ext_id_, static_cast<uint16_t>(offset),
+      static_cast<uint16_t>(need_block), static_cast<uint32_t>(value.size()),
+      checksum, kNoCompression);
   if (UNLIKELY(value.size() > kBufferSize)) {
     SubmitValueInBuffer();
     void* ptr = std::aligned_alloc(4096, aligned_value_size);

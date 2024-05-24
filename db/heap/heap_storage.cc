@@ -101,17 +101,16 @@ Status CFHeapStorage::OpenOrCreate(
   return s;
 }
 
-auto CFHeapStorage::GetHeapValueAsync(
-    const ReadOptions& ro, UringIoEngine* io_engine,
-    const ParsedInternalKey& ikey,
-    const HeapValueIndex& hvi) -> HeapValueGetContext {
+auto CFHeapStorage::GetHeapValueAsync(const ReadOptions& ro,
+                                      UringIoEngine* io_engine,
+                                      const HeapValueIndex& hvi)
+    -> HeapValueGetContext {
   if (heap_value_cache_) {
-    HeapValueCacheKey key = NewCacheKey(ikey.sequence, hvi);
+    HeapValueCacheKey key = NewCacheKey(hvi);
     auto handle = heap_value_cache_->Lookup(key.AsSlice());
     if (handle) {
       // ctx will have ownership of the cache handle
-      auto ctx = HeapValueGetContext(ikey.sequence, hvi, nullptr,
-                                     {nullptr, std::free});
+      auto ctx = HeapValueGetContext(hvi, nullptr, {nullptr, std::free});
       ctx.SetCacheHandle(heap_value_cache_.get(), handle);
       return ctx;
     }
@@ -121,33 +120,31 @@ auto CFHeapStorage::GetHeapValueAsync(
 
   if (no_io) {
     return HeapValueGetContext(
-        Status::Incomplete("Cannot read blob(s): no disk I/O allowed"),
-        ikey.sequence, hvi, nullptr, {nullptr, std::free});
+        Status::Incomplete("Cannot read blob(s): no disk I/O allowed"), hvi,
+        nullptr, {nullptr, std::free});
   }
 
   void* ptr = std::aligned_alloc(kHeapFileBlockSize,
                                  kHeapFileBlockSize * hvi.block_cnt());
   if (ptr == nullptr) {
     return HeapValueGetContext(Status::MemoryLimit("Failed to allocate memory"),
-                               ikey.sequence, hvi, nullptr,
-                               {nullptr, std::free});
+                               hvi, nullptr, {nullptr, std::free});
   }
   auto f = heap_file_->GetHeapValueAsync(
       io_engine, UringIoOptions(), hvi.extent_number(), hvi.block_offset(),
       hvi.block_cnt(), static_cast<uint8_t*>(ptr));
   RecordTick(cfd_->ioptions()->stats, HEAPKV_USER_BYTES_READ,
              hvi.block_cnt() * kHeapFileBlockSize);
-  return HeapValueGetContext(ikey.sequence, hvi, std::move(f),
+  return HeapValueGetContext(hvi, std::move(f),
                              std::unique_ptr<uint8_t[], decltype(std::free)*>(
                                  static_cast<uint8_t*>(ptr), std::free));
 }
 
 auto CFHeapStorage::GetHeapValue(const ReadOptions& ro,
                                  UringIoEngine* io_engine,
-                                 const ParsedInternalKey& ikey,
                                  const HeapValueIndex& hvi,
                                  PinnableSlice* value) -> Status {
-  auto ctx = GetHeapValueAsync(ro, io_engine, ikey, hvi);
+  auto ctx = GetHeapValueAsync(ro, io_engine, hvi);
   return WaitAsyncGet(ro, std::move(ctx), value);
 }
 
@@ -159,6 +156,8 @@ auto CFHeapStorage::WaitAsyncGet(const ReadOptions& ro, HeapValueGetContext ctx,
   }
   if (!ctx.cache_guard_.IsEmpty()) {
     // we get the value from cache
+    // std::cout << "Get heap value from cache: " << ctx.heap_value_index()
+    //           << std::endl;
     value->Reset();
     value->PinSlice(Slice(ctx.cache_guard_.GetValue()->allocation_.get(),
                           ctx.cache_guard_.GetValue()->size_),
@@ -185,7 +184,7 @@ auto CFHeapStorage::WaitAsyncGet(const ReadOptions& ro, HeapValueGetContext ctx,
   // TODO(wnj): decompress the value
   if (heap_value_cache_ && ro.fill_cache) {
     // cache the value
-    HeapValueCacheKey key = NewCacheKey(ctx.seq_, ctx.hvi_);
+    HeapValueCacheKey key = NewCacheKey(ctx.hvi_);
     auto cache_ptr = AllocateAndCopyBlock(
         Slice(reinterpret_cast<const char*>(ctx.buffer_.get()),
               ctx.hvi_.value_size()),

@@ -199,10 +199,6 @@ class GetContext {
     }
   }
 
-  const ParsedInternalKey& ikey_to_get_heap_value() const {
-    return parsed_key_for_heap_index_;
-  }
-
   uint64_t get_tracing_get_id() const { return tracing_get_id_; }
 
   void push_operand(const Slice& value, Cleanable* value_pinner);
@@ -220,8 +216,7 @@ class GetContext {
 
   bool GetBlobValue(const Slice& user_key, const Slice& blob_index,
                     PinnableSlice* blob_value);
-  bool GetHeapValue(const ParsedInternalKey& ikey,
-                    const Slice& heap_value_index, PinnableSlice* heap_value);
+  bool GetHeapValue(const Slice& heap_value_index, PinnableSlice* heap_value);
 
   void appendToReplayLog(ValueType type, Slice value, Slice ts);
 
@@ -234,7 +229,6 @@ class GetContext {
 
   GetState state_;
   Slice user_key_;
-  ParsedInternalKey parsed_key_for_heap_index_;
   // When a blob index is found with the user key containing timestamp,
   // this copies the corresponding user key on record in the sst file
   // and is later used for blob verification.
