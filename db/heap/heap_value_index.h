@@ -97,7 +97,9 @@ class HeapValueIndex {
   bool operator==(const HeapValueIndex& other) const {
     return extent_number_ == other.extent_number_ &&
            block_offset_ == other.block_offset_ &&
-           block_cnt_ == other.block_cnt_ && seq_num() == other.seq_num();
+           block_cnt_ == other.block_cnt_ &&
+           packed_seqnum_compression_type_ ==
+               other.packed_seqnum_compression_type_;
   }
 
   bool operator!=(const HeapValueIndex& other) const {

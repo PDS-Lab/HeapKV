@@ -1075,13 +1075,6 @@ bool DBIter::FindValueForCurrentKey() {
 
         return true;
       } else if (last_not_merge_type == kTypeHeapValueIndex) {
-        ParsedInternalKey ik;
-        Status s = ParseInternalKey(saved_key_.GetInternalKey(), &ik, false);
-        if (!s.ok()) {
-          status_ = s;
-          valid_ = false;
-          return false;
-        }
         if (!SetHeapValue(pinned_value_)) {
           return false;
         }
@@ -1120,13 +1113,6 @@ bool DBIter::FindValueForCurrentKey() {
 
       break;
     case kTypeHeapValueIndex: {
-      ParsedInternalKey ik;
-      Status s = ParseInternalKey(saved_key_.GetInternalKey(), &ik, false);
-      if (!s.ok()) {
-        status_ = s;
-        valid_ = false;
-        return false;
-      }
       if (!SetHeapValue(pinned_value_)) {
         return false;
       }
