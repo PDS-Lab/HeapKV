@@ -20,20 +20,22 @@ void HeapPrefetcher::PrefetchToCache(
   if (!heap_storage_ || !ro_.fill_cache || ro_.read_tier != kReadAllTier ||
       !heap_storage_->HasCache() || !index_iter->Valid() ||
       !data_iter->Valid() || !data_iter->IsHeapValueIndex() ||
-      pending_bytes_ >= kMaxPrefetchBytes ||
-      pending_prefetch_.size() >= kMaxPrefetchWindow) {
+      pending_bytes_ >= kMaxPrefetchBytes) {
     return;
   }
   if (index_iter->value().handle != current_block_) {
-    ClearPrefetch();
+    // ClearPrefetch();
     current_block_ = index_iter->value().handle;
     current_prefetch_offset_ = -1;
   }
   uint32_t next_off = current_prefetch_offset_ == -1
                           ? data_iter->HeapValueIndexOffset()
                           : current_prefetch_offset_ + 1;
+  if (next_off - data_iter->HeapValueIndexOffset() >= kMaxPrefetchWindow / 2) {
+    return;
+  }
   while (pending_bytes_ < kMaxPrefetchBytes &&
-         pending_prefetch_.size() < kMaxPrefetchWindow) {
+         (next_off - data_iter->HeapValueIndexOffset()) < kMaxPrefetchWindow) {
     auto raw_hvi = data_iter->GetHeapValueIndex(next_off);
     if (!raw_hvi.has_value()) {
       break;

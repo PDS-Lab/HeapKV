@@ -17,8 +17,8 @@ namespace heapkv {
 
 class HeapPrefetcher {
  public:
-  static constexpr size_t kMaxPrefetchBytes = 128 * 1024;
-  static constexpr size_t kMaxPrefetchWindow = 8;
+  static constexpr size_t kMaxPrefetchBytes = 256 * 1024;
+  static constexpr size_t kMaxPrefetchWindow = 16;
 
  private:
   const ReadOptions& ro_;
