@@ -26,8 +26,8 @@ class HeapAllocJob {
   struct AllocCtx {
     ext_id_t current_ext_id_{InValidExtentId};
     bool allocated_{false};
-    uint16_t base_bno_{0};
-    uint16_t cnt_{0};
+    uint32_t base_bno_{0};
+    uint32_t cnt_{0};
   };
 
   struct IoReq {

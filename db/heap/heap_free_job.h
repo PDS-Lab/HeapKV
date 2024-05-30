@@ -38,7 +38,7 @@ class HeapFreeJob {
     uint64_t size_{0};  // size to punch
   };
   HoleToPunch HoleToPunchAfterFree(ext_id_t ext_id, const ExtentBitmap& bm,
-                                   uint16_t block_offset, uint16_t block_cnt);
+                                   uint32_t block_offset, uint32_t block_cnt);
   void ReadWriteTick(bool read, size_t size);
 };
 

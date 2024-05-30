@@ -1,10 +1,10 @@
 #include "db/heap/heap_file.h"
 
-#include <atomic>
 #include <cassert>
 #include <optional>
 
 #include "db/heap/io_engine.h"
+#include "port/likely.h"
 #ifndef NDEBUG
 #include "db/heap/utils.h"
 #endif
@@ -19,27 +19,25 @@ namespace heapkv {
 auto ExtentManager::AllocNewExtent() -> std::optional<ext_id_t> {
   MutexLock l(&mu_);
   ext_id_t new_ext_id = next_extent_num_++;
-  extents_.emplace_back(ExtentMetaData{new_ext_id, kTotalFreeBits});
-  sort_extents_.emplace(new_ext_id);
-  latch_.emplace(new_ext_id, decltype(latch_)::mapped_type());
+  auto ext = GetExtent(new_ext_id);
+  ext->mu_.Lock();
+  ext->meta_ = ExtentMetaData{new_ext_id, kTotalFreeBits};
+  ext->ptr_ = sort_extents_.end();
   return new_ext_id;
 }
 
 auto ExtentManager::TryLockMostFreeExtent(double allocatable_threshold)
     -> std::optional<ext_id_t> {
   MutexLock l(&mu_);
+  if (sort_extents_.empty()) {
+    return std::nullopt;
+  }
   for (auto it = sort_extents_.begin(); it != sort_extents_.end(); it++) {
-    if (extents_[*it].approximate_free_bits_ / double(kTotalFreeBits) >
-        allocatable_threshold) {
-      auto latch_it = latch_.find(*it);
-      if (latch_it != latch_.end()) {
-        continue;
-      } else {
-        latch_.emplace(*it, decltype(latch_)::mapped_type());
-        return *it;
-      }
-    } else {
-      break;
+    if ((*it)->mu_.TryLock()) {
+      ext_id_t eid = (*it)->meta_.extent_number_;
+      (*it)->ptr_ = sort_extents_.end();
+      sort_extents_.erase(it);
+      return eid;
     }
   }
   return std::nullopt;
@@ -50,34 +48,39 @@ auto ExtentManager::TryLockExtent(ext_id_t extent_number) -> bool {
   if (extent_number >= next_extent_num_) {
     return false;
   }
-  auto latch_it = latch_.find(extent_number);
-  if (latch_it != latch_.end()) {
-    return false;
-  } else {
-    latch_.emplace(extent_number, decltype(latch_)::mapped_type());
+  auto ext = GetExtent(extent_number);
+  if (ext->mu_.TryLock()) {
+    if (ext->ptr_ != sort_extents_.end()) {
+      sort_extents_.erase(ext->ptr_);
+      ext->ptr_ = sort_extents_.end();
+    }
     return true;
   }
+  return false;
 }
 
 void ExtentManager::LockExtent(ext_id_t extent_number) {
-  std::atomic_bool released = false;
-  port::CondVar cv(&mu_);
-  MutexLock l(&mu_);
-  while (true) {
-    auto latch_it = latch_.find(extent_number);
-    if (latch_it != latch_.end()) {
-      latch_it->second.emplace_back(&released, &cv);
-      // we cannot access latch_it since here
-      while (!released.load(std::memory_order_acquire)) {
-        cv.Wait();
-      }
-      // waker pop the cv from the latch
-      return;
-    } else {
-      latch_.emplace(extent_number, decltype(latch_)::mapped_type());
-      return;
+  mu_.Lock();
+  assert(extent_number < next_extent_num_);
+  auto ext = GetExtent(extent_number);
+  // fast check
+  if (ext->mu_.TryLock()) {
+    if (ext->ptr_ != sort_extents_.end()) {
+      sort_extents_.erase(ext->ptr_);
+      ext->ptr_ = sort_extents_.end();
     }
+    mu_.Unlock();
+    return;
   }
+  // slow path
+  mu_.Unlock();
+  ext->mu_.Lock();
+  mu_.Lock();
+  if (ext->ptr_ != sort_extents_.end()) {
+    sort_extents_.erase(ext->ptr_);
+    ext->ptr_ = sort_extents_.end();
+  }
+  mu_.Unlock();
 }
 
 void ExtentManager::UnlockExtent(ext_id_t extent_number,
@@ -100,21 +103,31 @@ void ExtentManager::UnlockExtents(const std::vector<ExtentMetaData> &extents,
 void ExtentManager::UnlockExtentInternal(ext_id_t extent_number,
                                          uint32_t new_approximate_free_bits,
                                          bool update_free_bits) {
-  auto latch_it = latch_.find(extent_number);
-  assert(latch_it != latch_.end());
-  if (latch_it->second.empty()) {
-    latch_.erase(latch_it);
-  } else {
-    auto &pair = latch_it->second.front();
-    pair.first->store(true, std::memory_order_release);
-    pair.second->Signal();
-    latch_it->second.pop_front();
-  }
+  assert(extent_number < next_extent_num_);
+  auto ext = GetExtent(extent_number);
   if (update_free_bits) {
-    sort_extents_.erase(extent_number);
-    extents_[extent_number].approximate_free_bits_ = new_approximate_free_bits;
-    sort_extents_.insert(extent_number);
+    ext->meta_.approximate_free_bits_ = new_approximate_free_bits;
   }
+  if (ext->meta_.approximate_free_bits_ / double(kTotalFreeBits) >
+      allocatable_threshold_) {
+    auto r = sort_extents_.insert(ext);
+    assert(r.second);
+    ext->ptr_ = r.first;
+  }
+  ext->mu_.Unlock();
+}
+
+auto ExtentManager::GetExtent(ext_id_t extent_number) -> Extent * {
+  size_t pid = extent_number / kExtentPerPage;
+  if (UNLIKELY(pages_.size() <= pid)) {
+    auto ptr = std::aligned_alloc(4096, kPageSize);
+    pages_.push_back(ptr);
+    for (size_t i = 0; i < kExtentPerPage; i++) {
+      new (reinterpret_cast<Extent *>(ptr) + i) Extent();
+    }
+  }
+  return reinterpret_cast<Extent *>(pages_[pid]) +
+         extent_number % kExtentPerPage;
 }
 
 auto HeapFile::Open(UringIoEngine *io_engine, const std::string &filename,
@@ -202,7 +215,7 @@ auto HeapFile::WriteExtentHeader(UringIoEngine *io_engine,
 
 auto HeapFile::GetHeapValueAsync(
     UringIoEngine *io_engine, const UringIoOptions &opts,
-    ext_id_t extent_number, uint16_t block_offset, uint16_t block_count,
+    ext_id_t extent_number, uint32_t block_offset, uint32_t block_count,
     uint8_t *buffer, int fixed_fd_index) -> std::unique_ptr<UringCmdFuture> {
   assert(!opts.FixedFile() || fixed_fd_index >= 0);
   assert(!use_direct_io() ||
@@ -214,7 +227,7 @@ auto HeapFile::GetHeapValueAsync(
 
 auto HeapFile::GetHeapValue(UringIoEngine *io_engine,
                             const UringIoOptions &opts, ext_id_t extent_number,
-                            uint16_t block_offset, uint16_t block_count,
+                            uint32_t block_offset, uint32_t block_count,
                             uint8_t *buffer, int fixed_fd_index) -> Status {
   auto f = GetHeapValueAsync(io_engine, opts, extent_number, block_offset,
                              block_count, buffer, fixed_fd_index);
@@ -227,7 +240,7 @@ auto HeapFile::GetHeapValue(UringIoEngine *io_engine,
 
 auto HeapFile::PutHeapValueAsync(
     UringIoEngine *io_engine, const UringIoOptions &opts,
-    ext_id_t extent_number, uint16_t block_offset, uint16_t block_count,
+    ext_id_t extent_number, uint32_t block_offset, uint32_t block_count,
     const uint8_t *buffer,
     int fixed_fd_index) -> std::unique_ptr<UringCmdFuture> {
   assert(!opts.FixedFile() || fixed_fd_index >= 0);
@@ -240,7 +253,7 @@ auto HeapFile::PutHeapValueAsync(
 
 auto HeapFile::PutHeapValue(UringIoEngine *io_engine,
                             const UringIoOptions &opts, ext_id_t extent_number,
-                            uint16_t block_offset, uint16_t block_count,
+                            uint32_t block_offset, uint32_t block_count,
                             const uint8_t *buffer,
                             int fixed_fd_index) -> Status {
   auto f = PutHeapValueAsync(io_engine, opts, extent_number, block_offset,

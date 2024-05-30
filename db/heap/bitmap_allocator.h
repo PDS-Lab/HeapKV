@@ -35,8 +35,8 @@ class BitMapAllocator {
  private:
   // [start, end)
   struct Segment {
-    uint16_t start{0};
-    uint16_t end{0};
+    uint32_t start{0};
+    uint32_t end{0};
     Segment() = default;
     Segment(uint32_t s, uint32_t e) : start(s), end(e) {}
     uint32_t size() const { return end - start; }
@@ -44,7 +44,7 @@ class BitMapAllocator {
   };
 
  private:
-  uint16_t size_{0};  // size in bytes, less than 4KiB
+  uint32_t size_{0};  // size in bytes
   Segment current_alloc_seg_{};
   uint32_t total_free_bits_{0};
   // we might need to access raw data in priority queue in the future, so we use
@@ -63,7 +63,7 @@ class BitMapAllocator {
     bm_ = nullptr;
   }
 
-  void Init(uint16_t size, uint8_t *bm, bool empty_hint = false);
+  void Init(uint32_t size, uint8_t *bm, bool empty_hint = false);
 
   int32_t Alloc(uint32_t n);
 

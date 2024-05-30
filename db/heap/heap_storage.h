@@ -10,7 +10,6 @@
 #include "cache/cache_helpers.h"
 #include "cache/cache_key.h"
 #include "db/column_family.h"
-#include "db/dbformat.h"
 #include "db/heap/heap_alloc_job.h"
 #include "db/heap/heap_file.h"
 #include "db/heap/heap_free_job.h"
@@ -35,8 +34,7 @@ class HeapValueCacheKey : private CacheKey {
   // seqnumber of the key as we do in-place update in heapfile
   [[maybe_unused]] SequenceNumber seq_;
   ext_id_t ext_id_;
-  uint16_t block_offset_;
-  [[maybe_unused]] char _reserved_[2]{0};  // pad to alignment to keep unique
+  uint32_t block_offset_;
 
  public:
   HeapValueCacheKey(CacheKey cache_key, const HeapValueIndex& hvi)
@@ -45,7 +43,7 @@ class HeapValueCacheKey : private CacheKey {
         ext_id_(hvi.extent_number()),
         block_offset_(hvi.block_offset()) {}
   HeapValueCacheKey(CacheKey cache_key, SequenceNumber seq, ext_id_t ext_id,
-                    uint16_t block_offset)
+                    uint32_t block_offset)
       : CacheKey(cache_key),
         seq_(seq),
         ext_id_(ext_id),

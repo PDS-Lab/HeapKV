@@ -16,8 +16,8 @@ class HeapGarbageCollector {
  public:
   struct GarbageBlocks {
     ext_id_t extent_number_;
-    uint16_t block_offset_;
-    uint16_t block_cnt_;
+    uint32_t block_offset_;
+    uint32_t block_cnt_;
   };
 
  private:

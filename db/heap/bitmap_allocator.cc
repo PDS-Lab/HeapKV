@@ -42,7 +42,7 @@ void UnSetBitMap(uint8_t *bm, uint32_t off, uint32_t n) {
   }
 }
 
-void BitMapAllocator::Init(uint16_t size, uint8_t *bm, bool empty_hint) {
+void BitMapAllocator::Init(uint32_t size, uint8_t *bm, bool empty_hint) {
   Reset();
   size_ = size;
   bm_ = bm;
@@ -54,7 +54,7 @@ void BitMapAllocator::Init(uint16_t size, uint8_t *bm, bool empty_hint) {
 
   uint32_t c = 0;
   int32_t s = -1;
-  for (uint16_t i = 0; i < size_; i++) {
+  for (uint32_t i = 0; i < size_; i++) {
     uint8_t lz = LeadingZero(bm_[i]);
     uint8_t tz = TailingZero(bm_[i]);
     if (s == -1) {
@@ -113,7 +113,7 @@ uint32_t BitMapAllocator::CalcApproximateFreeBits(const uint8_t *bm,
   uint32_t c = 0;
   int32_t s = -1;
   uint32_t total = 0;
-  for (uint16_t i = 0; i < size; i++) {
+  for (uint32_t i = 0; i < size; i++) {
     uint8_t lz = LeadingZero(bm[i]);
     uint8_t tz = TailingZero(bm[i]);
     if (s == -1) {

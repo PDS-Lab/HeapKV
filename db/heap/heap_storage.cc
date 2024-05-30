@@ -93,8 +93,9 @@ Status CFHeapStorage::OpenOrCreate(
   if (!s.ok()) {
     return s;
   }
-  auto ext_manager = std::make_unique<ExtentManager>(heap_file.get(), num_exts,
-                                                     std::move(extents));
+  auto ext_manager = std::make_unique<ExtentManager>(
+      heap_file.get(), cfd->ioptions()->heap_extent_allocatable_threshold,
+      num_exts, std::move(extents));
   *storage_handle = std::make_unique<CFHeapStorage>(
       cfd, cfd->ioptions()->heap_value_cache, std::move(heap_file),
       std::move(ext_manager));

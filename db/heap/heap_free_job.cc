@@ -24,6 +24,7 @@ namespace heapkv {
 HeapFreeJob::~HeapFreeJob() { cfd_->heap_storage()->NotifyJobDone(job_id_); }
 
 Status HeapFreeJob::Run() {
+  auto start = std::chrono::steady_clock::now();
   int fd = extent_manager_->heap_file()->fd();
   io_engine_->RegisterFiles(&fd, 1);
 
@@ -131,16 +132,20 @@ Status HeapFreeJob::Run() {
   }
   extent_manager_->UnlockExtents(exts, true);
   io_engine_->UnregisterFiles();
+  auto end = std::chrono::steady_clock::now();
   ROCKS_LOG_INFO(
       cfd_->ioptions()->info_log,
-      "HeapFreeJob done: job_id=%lu, extents_num=%lu, holes=%lu, status=%s",
-      job_id_, extents.size(), holes.size(), s.ToString().c_str());
+      "HeapFreeJob done: job_id=%lu, extents_num=%lu, holes=%lu, status=%s, "
+      "last=%lu milliseconds",
+      job_id_, extents.size(), holes.size(), s.ToString().c_str(),
+      std::chrono::duration_cast<std::chrono::milliseconds>(end - start)
+          .count());
   return s;
 }
 
 HeapFreeJob::HoleToPunch HeapFreeJob::HoleToPunchAfterFree(
-    ext_id_t ext_id, const ExtentBitmap &bm, uint16_t block_offset,
-    uint16_t block_cnt) {
+    ext_id_t ext_id, const ExtentBitmap &bm, uint32_t block_offset,
+    uint32_t block_cnt) {
   size_t start_byte = block_offset / 8;
   size_t end_byte = (block_offset + block_cnt - 1) / 8;
   size_t start_4bytes = start_byte / 4;
