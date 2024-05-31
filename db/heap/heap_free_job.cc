@@ -25,8 +25,9 @@ HeapFreeJob::~HeapFreeJob() { cfd_->heap_storage()->NotifyJobDone(job_id_); }
 
 Status HeapFreeJob::Run() {
   auto start = std::chrono::steady_clock::now();
+  auto io_engine = GetThreadLocalIoEngine();
   int fd = extent_manager_->heap_file()->fd();
-  io_engine_->RegisterFiles(&fd, 1);
+  io_engine->RegisterFiles(&fd, 1);
 
   Status s;
   // dropped_blocks_ is sorted by HeapGarbageCollector
@@ -45,7 +46,7 @@ Status HeapFreeJob::Run() {
   for (auto ext : extents) {
     auto bm = std::make_unique<ExtentBitmap>();
     auto f = extent_manager_->heap_file()->ReadExtentHeaderAsync(
-        io_engine_, UringIoOptions(IOSQE_FIXED_FILE), ext, bm.get(), 0);
+        io_engine, UringIoOptions(IOSQE_FIXED_FILE), ext, bm.get(), 0);
     buffers.push_back(std::move(bm));
     futures.push_back(std::move(f));
     ReadWriteTick(true, kExtentHeaderSize);
@@ -72,15 +73,15 @@ Status HeapFreeJob::Run() {
            dropped_blocks_[pos].extent_number_ == eid) {
       UnSetBitMap(buffers[i]->Bitmap(), dropped_blocks_[pos].block_offset_,
                   dropped_blocks_[pos].block_cnt_);
-      auto hole = HoleToPunchAfterFree(eid, *buffers[i],
-                                       dropped_blocks_[pos].block_offset_,
-                                       dropped_blocks_[pos].block_cnt_);
-      if (!holes.empty() && hole.size_ > 0 &&
-          holes.back().off_ + holes.back().size_ == hole.off_) {
-        holes.back().size_ += hole.size_;
-      } else if (hole.size_ > 0) {
-        holes.push_back(hole);
-      }
+      // auto hole = HoleToPunchAfterFree(eid, *buffers[i],
+      //                                  dropped_blocks_[pos].block_offset_,
+      //                                  dropped_blocks_[pos].block_cnt_);
+      // if (!holes.empty() && hole.size_ > 0 &&
+      //     holes.back().off_ + holes.back().size_ == hole.off_) {
+      //   holes.back().size_ += hole.size_;
+      // } else if (hole.size_ > 0) {
+      //   holes.push_back(hole);
+      // }
       pos++;
     }
     buffers[i]->GenerateChecksum();
@@ -90,15 +91,15 @@ Status HeapFreeJob::Run() {
     futures.clear();
     for (size_t i = 0; i < extents.size(); i++) {
       auto f = extent_manager_->heap_file()->WriteExtentHeaderAsync(
-          io_engine_, UringIoOptions(IOSQE_FIXED_FILE), extents[i], *buffers[i],
+          io_engine, UringIoOptions(IOSQE_FIXED_FILE), extents[i], *buffers[i],
           0);
       futures.push_back(std::move(f));
       ReadWriteTick(false, kExtentHeaderSize);
     }
     for (auto hole : holes) {
-      auto f = io_engine_->Fallocate(UringIoOptions(IOSQE_FIXED_FILE), 0,
-                                     FALLOC_FL_PUNCH_HOLE | FALLOC_FL_KEEP_SIZE,
-                                     hole.off_, hole.size_);
+      auto f = io_engine->Fallocate(UringIoOptions(IOSQE_FIXED_FILE), 0,
+                                    FALLOC_FL_PUNCH_HOLE | FALLOC_FL_KEEP_SIZE,
+                                    hole.off_, hole.size_);
       futures.push_back(std::move(f));
     }
     for (auto &f : futures) {
@@ -115,7 +116,7 @@ Status HeapFreeJob::Run() {
     futures.clear();
   }
   auto f = extent_manager_->heap_file()->FsyncAsync(
-      io_engine_, UringIoOptions(IOSQE_FIXED_FILE), true, 0);
+      io_engine, UringIoOptions(IOSQE_FIXED_FILE), true, 0);
   f->Wait();
   if (f->Result() < 0) {
     assert(false);
@@ -131,7 +132,7 @@ Status HeapFreeJob::Run() {
     });
   }
   extent_manager_->UnlockExtents(exts, true);
-  io_engine_->UnregisterFiles();
+  io_engine->UnregisterFiles();
   auto end = std::chrono::steady_clock::now();
   ROCKS_LOG_INFO(
       cfd_->ioptions()->info_log,

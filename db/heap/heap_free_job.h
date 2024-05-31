@@ -6,7 +6,6 @@
 #include "db/column_family.h"
 #include "db/heap/heap_file.h"
 #include "db/heap/heap_garbage_collector.h"
-#include "db/heap/io_engine.h"
 #include "rocksdb/rocksdb_namespace.h"
 
 namespace ROCKSDB_NAMESPACE {
@@ -16,7 +15,6 @@ class HeapFreeJob {
  private:
   const uint64_t job_id_;
   const ColumnFamilyData* cfd_;
-  UringIoEngine* io_engine_;
   ExtentManager* extent_manager_;
   std::vector<HeapGarbageCollector::GarbageBlocks> dropped_blocks_;
 
@@ -26,7 +24,6 @@ class HeapFreeJob {
               std::vector<HeapGarbageCollector::GarbageBlocks> dropped_blocks)
       : job_id_(job_id),
         cfd_(cfd),
-        io_engine_(GetThreadLocalIoEngine()),
         extent_manager_(extent_manager),
         dropped_blocks_(std::move(dropped_blocks)) {}
   ~HeapFreeJob();
