@@ -1,6 +1,11 @@
 #include "db/heap/heap_file.h"
 
+#include <fcntl.h>
+#include <linux/stat.h>
+#include <sys/stat.h>
+
 #include <cassert>
+#include <cerrno>
 #include <optional>
 
 #include "db/heap/io_engine.h"
@@ -137,24 +142,20 @@ auto HeapFile::Open(UringIoEngine *io_engine, const std::string &filename,
   if (use_direct_io) {
     flag |= O_DIRECT;
   }
-  auto f = io_engine->OpenAt(UringIoOptions(), AT_FDCWD, filename.c_str(), flag,
-                             0644);
-  f->Wait();
-  if (f->Result() < 0) {
-    return Status::IOError("open failed", strerror(-f->Result()));
+  int fd = openat(AT_FDCWD, filename.c_str(), flag, 0644);
+  if (fd < 0) {
+    return Status::IOError("open failed", strerror(errno));
   }
-  *file_handle = std::make_unique<HeapFile>(
-      filename, f->Result(), column_family_id, column_family_id, use_direct_io);
+  *file_handle = std::make_unique<HeapFile>(filename, fd, column_family_id,
+                                            column_family_id, use_direct_io);
   return Status::OK();
 }
 
 auto HeapFile::Stat(UringIoEngine *io_engine,
                     struct statx *statxbuf) -> Status {
-  auto f = io_engine->Statx(UringIoOptions(), fd_, "", AT_EMPTY_PATH,
-                            STATX_BASIC_STATS, statxbuf);
-  f->Wait();
-  if (f->Result() < 0) {
-    return Status::IOError("stat failed", strerror(-f->Result()));
+  int rc = statx(fd_, "", AT_EMPTY_PATH, STATX_BASIC_STATS, statxbuf);
+  if (rc < 0) {
+    return Status::IOError("stat failed", strerror(errno));
   }
   return Status::OK();
 }
@@ -265,20 +266,21 @@ auto HeapFile::PutHeapValue(UringIoEngine *io_engine,
   return Status::OK();
 }
 
-auto HeapFile::FsyncAsync(UringIoEngine *io_engine, const UringIoOptions &opts,
-                          bool datasync, int fixed_fd_index)
-    -> std::unique_ptr<UringCmdFuture> {
-  assert(!opts.FixedFile() || fixed_fd_index >= 0);
-  return io_engine->Fsync(opts, opts.FixedFile() ? fixed_fd_index : fd(),
-                          datasync);
-}
+// auto HeapFile::FsyncAsync(UringIoEngine *io_engine, const UringIoOptions
+// &opts,
+//                           bool datasync, int fixed_fd_index)
+//     -> std::unique_ptr<UringCmdFuture> {
+//   assert(!opts.FixedFile() || fixed_fd_index >= 0);
+
+//   return io_engine->Fsync(opts, opts.FixedFile() ? fixed_fd_index : fd(),
+//                           datasync);
+// }
 
 auto HeapFile::Fsync(UringIoEngine *io_engine, const UringIoOptions &opts,
                      bool datasync, int fixed_fd_index) -> Status {
-  auto f = FsyncAsync(io_engine, opts, datasync, fixed_fd_index);
-  f->Wait();
-  if (f->Result() < 0) {
-    return Status::IOError("fsync failed", strerror(-f->Result()));
+  int rc = datasync ? fdatasync(fd()) : fsync(fd());
+  if (rc < 0) {
+    return Status::IOError("fsync failed", strerror(errno));
   }
   return Status::OK();
 }

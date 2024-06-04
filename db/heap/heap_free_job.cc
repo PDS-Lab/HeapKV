@@ -96,12 +96,13 @@ Status HeapFreeJob::Run() {
       futures.push_back(std::move(f));
       ReadWriteTick(false, kExtentHeaderSize);
     }
-    for (auto hole : holes) {
-      auto f = io_engine->Fallocate(UringIoOptions(IOSQE_FIXED_FILE), 0,
-                                    FALLOC_FL_PUNCH_HOLE | FALLOC_FL_KEEP_SIZE,
-                                    hole.off_, hole.size_);
-      futures.push_back(std::move(f));
-    }
+    // for (auto hole : holes) {
+    //   auto f = io_engine->Fallocate(UringIoOptions(IOSQE_FIXED_FILE), 0,
+    //                                 FALLOC_FL_PUNCH_HOLE |
+    //                                 FALLOC_FL_KEEP_SIZE, hole.off_,
+    //                                 hole.size_);
+    //   futures.push_back(std::move(f));
+    // }
     for (auto &f : futures) {
       f->Wait();
       if (f->Result() < 0) {
@@ -115,13 +116,8 @@ Status HeapFreeJob::Run() {
     }
     futures.clear();
   }
-  auto f = extent_manager_->heap_file()->FsyncAsync(
-      io_engine, UringIoOptions(IOSQE_FIXED_FILE), true, 0);
-  f->Wait();
-  if (f->Result() < 0) {
-    assert(false);
-    s = Status::IOError("Failed to fsync", strerror(-f->Result()));
-  }
+  s = extent_manager_->heap_file()->Fsync(
+      io_engine, UringIoOptions(IOSQE_FIXED_FILE), true);
   std::vector<ExtentMetaData> exts;
   exts.reserve(extents.size());
   for (size_t i = 0; i < extents.size(); i++) {

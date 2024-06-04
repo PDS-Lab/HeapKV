@@ -129,9 +129,10 @@ class HeapFile {
                     ext_id_t extent_number, uint32_t block_offset,
                     uint32_t block_count, const uint8_t *buffer,
                     int fixed_fd_index) -> Status;
-  auto FsyncAsync(UringIoEngine *io_engine, const UringIoOptions &opts,
-                  bool datasync,
-                  int fixed_fd_index = -1) -> std::unique_ptr<UringCmdFuture>;
+  // auto FsyncAsync(UringIoEngine *io_engine, const UringIoOptions &opts,
+  //                 bool datasync,
+  //                 int fixed_fd_index = -1) ->
+  //                 std::unique_ptr<UringCmdFuture>;
   auto Fsync(UringIoEngine *io_engine, const UringIoOptions &opts,
              bool datasync, int fixed_fd_index = -1) -> Status;
 };
