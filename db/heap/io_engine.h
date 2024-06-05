@@ -7,7 +7,6 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
-#include <iostream>
 #include <memory>
 
 #include "rocksdb/rocksdb_namespace.h"
@@ -64,11 +63,8 @@ class UringCmdFuture {
 
 struct UringIoOptions {
   uint32_t flags_{0};
-  bool submit_now_{true};
   UringIoOptions() = default;
   UringIoOptions(uint32_t flags) : flags_(flags) {}
-  UringIoOptions(uint32_t flags, bool submit_now)
-      : flags_(flags), submit_now_(submit_now) {}
   bool FixedFile() const { return flags_ & IOSQE_FIXED_FILE; }
 };
 
@@ -97,33 +93,8 @@ class UringIoEngine {
   // noncopyable
   UringIoEngine(const UringIoEngine&) = delete;
   UringIoEngine& operator=(const UringIoEngine&) = delete;
-  static auto NewUringIoEngine() -> std::unique_ptr<UringIoEngine> {
-    auto engine = std::make_unique<UringIoEngine>();
-    int ret = io_uring_queue_init(kRingDepth, &engine->ring_,
-                                  IORING_SETUP_COOP_TASKRUN |
-                                      IORING_SETUP_TASKRUN_FLAG |
-                                      IORING_SETUP_SINGLE_ISSUER);
-    if (ret < 0) {
-      std::cerr << "io_uring_queue_init failed: " << ret << " "
-                << strerror(-ret) << std::endl;
-      return nullptr;
-    }
-    uint32_t max_wrk[2]{1, 1};
-    ret = io_uring_register_iowq_max_workers(&engine->ring_, max_wrk);
-    if (ret < 0) {
-      std::cerr << "io_uring_register_iowq_max_workers failed: " << ret << " "
-                << strerror(-ret) << std::endl;
-      return nullptr;
-    }
-    engine->inflight_ = 0;
-    engine->next_free_ = 0;
-    for (size_t i = 0; i < kRingDepth; i++) {
-      engine->handles_[i].future = nullptr;
-      engine->handles_[i].type = UringIoType::UnInit;
-      engine->handles_[i].next_free = i + 1;
-    }
-    return engine;
-  }
+  static auto UniqueWqFd() -> int;
+  static auto NewUringIoEngine() -> std::unique_ptr<UringIoEngine>;
 
   ~UringIoEngine() {
     while (inflight_ > 0) {
@@ -171,6 +142,7 @@ class UringIoEngine {
   }
 
   void FreeHandle(UringCmdHandle* handle) {
+    handle->type = UringIoType::UnInit;
     handle->next_free = next_free_;
     next_free_ = handle - handles_;
   }

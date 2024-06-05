@@ -8,6 +8,8 @@
 #include <iostream>
 
 #include "port/likely.h"
+#include "port/port_posix.h"
+#include "util/mutexlock.h"
 
 namespace ROCKSDB_NAMESPACE {
 namespace heapkv {
@@ -16,6 +18,59 @@ void UringCmdFuture::Wait() {
   while (!Done()) {
     engine_->PollCq(true);
   }
+}
+
+int UringIoEngine::UniqueWqFd() {
+  static UringIoEngine engine;
+  static bool inited = false;
+  static port::Mutex mu;
+  {
+    MutexLock l(&mu);
+    if (!inited) {
+      io_uring_params params;
+      memset(&params, 0, sizeof(params));
+      params.flags = IORING_SETUP_SQPOLL;
+      params.sq_thread_idle = 50;
+      int ret = io_uring_queue_init_params(8, &engine.ring_, &params);
+      if (ret < 0) {
+        std::cerr << "io_uring_queue_init failed: " << ret << " "
+                  << strerror(-ret) << std::endl;
+        return -1;
+      }
+      inited = true;
+    }
+    return engine.ring_.ring_fd;
+  }
+}
+
+auto UringIoEngine::NewUringIoEngine() -> std::unique_ptr<UringIoEngine> {
+  auto engine = std::make_unique<UringIoEngine>();
+  io_uring_params params;
+  memset(&params, 0, sizeof(params));
+  params.flags = IORING_SETUP_SQPOLL | IORING_SETUP_ATTACH_WQ;
+  params.sq_thread_idle = 50;
+  params.wq_fd = UniqueWqFd();
+  int ret = io_uring_queue_init_params(kRingDepth, &engine->ring_, &params);
+  if (ret < 0) {
+    std::cerr << "io_uring_queue_init failed: " << ret << " " << strerror(-ret)
+              << std::endl;
+    return nullptr;
+  }
+  uint32_t max_wrk[2]{1, 1};
+  ret = io_uring_register_iowq_max_workers(&engine->ring_, max_wrk);
+  if (ret < 0) {
+    std::cerr << "io_uring_register_iowq_max_workers failed: " << ret << " "
+              << strerror(-ret) << std::endl;
+    return nullptr;
+  }
+  engine->inflight_ = 0;
+  engine->next_free_ = 0;
+  for (size_t i = 0; i < kRingDepth; i++) {
+    engine->handles_[i].future = nullptr;
+    engine->handles_[i].type = UringIoType::UnInit;
+    engine->handles_[i].next_free = i + 1;
+  }
+  return engine;
 }
 
 void UringIoEngine::PollCq(bool wait) {
@@ -45,15 +100,12 @@ void UringIoEngine::SubmitIo(const UringIoOptions opts, UringCmdHandle* handle,
                              io_uring_sqe* sqe) {
   io_uring_sqe_set_data(sqe, handle);
   io_uring_sqe_set_flags(sqe, opts.flags_);
-  int ret = 0;
-  if (opts.submit_now_) {
-    ret = io_uring_submit(&ring_);
-    if (UNLIKELY(ret < 0)) {
-      std::cerr << "io_uring_submit failed: " << ret << " " << strerror(-ret)
-                << std::endl;
-      handle->future->SetResult(ret, 0);
-      FreeHandle(handle);
-    }
+  int ret = io_uring_submit(&ring_);
+  if (UNLIKELY(ret < 0)) {
+    std::cerr << "io_uring_submit failed: " << ret << " " << strerror(-ret)
+              << std::endl;
+    handle->future->SetResult(ret, 0);
+    FreeHandle(handle);
   }
   if (ret >= 0) {
     inflight_++;
