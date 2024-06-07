@@ -1,134 +1,16 @@
 #include "db/heap/heap_file.h"
 
 #include <cassert>
-#include <optional>
 
 #include "db/heap/io_engine.h"
-#include "port/likely.h"
 #ifndef NDEBUG
 #include "db/heap/utils.h"
 #endif
 #include "fcntl.h"
-#include "port/port_posix.h"
 #include "rocksdb/status.h"
-#include "util/mutexlock.h"
 
 namespace ROCKSDB_NAMESPACE {
 namespace heapkv {
-
-auto ExtentManager::AllocNewExtent() -> std::optional<ext_id_t> {
-  MutexLock l(&mu_);
-  ext_id_t new_ext_id = next_extent_num_++;
-  auto ext = GetExtent(new_ext_id);
-  ext->mu_.Lock();
-  ext->meta_ = ExtentMetaData{new_ext_id, kTotalFreeBits};
-  ext->ptr_ = sort_extents_.end();
-  return new_ext_id;
-}
-
-auto ExtentManager::TryLockMostFreeExtent(double allocatable_threshold)
-    -> std::optional<ext_id_t> {
-  MutexLock l(&mu_);
-  if (sort_extents_.empty()) {
-    return std::nullopt;
-  }
-  for (auto it = sort_extents_.begin(); it != sort_extents_.end(); it++) {
-    if ((*it)->mu_.TryLock()) {
-      ext_id_t eid = (*it)->meta_.extent_number_;
-      (*it)->ptr_ = sort_extents_.end();
-      sort_extents_.erase(it);
-      return eid;
-    }
-  }
-  return std::nullopt;
-}
-
-auto ExtentManager::TryLockExtent(ext_id_t extent_number) -> bool {
-  MutexLock l(&mu_);
-  if (extent_number >= next_extent_num_) {
-    return false;
-  }
-  auto ext = GetExtent(extent_number);
-  if (ext->mu_.TryLock()) {
-    if (ext->ptr_ != sort_extents_.end()) {
-      sort_extents_.erase(ext->ptr_);
-      ext->ptr_ = sort_extents_.end();
-    }
-    return true;
-  }
-  return false;
-}
-
-void ExtentManager::LockExtent(ext_id_t extent_number) {
-  mu_.Lock();
-  assert(extent_number < next_extent_num_);
-  auto ext = GetExtent(extent_number);
-  // fast check
-  if (ext->mu_.TryLock()) {
-    if (ext->ptr_ != sort_extents_.end()) {
-      sort_extents_.erase(ext->ptr_);
-      ext->ptr_ = sort_extents_.end();
-    }
-    mu_.Unlock();
-    return;
-  }
-  // slow path
-  mu_.Unlock();
-  ext->mu_.Lock();
-  mu_.Lock();
-  if (ext->ptr_ != sort_extents_.end()) {
-    sort_extents_.erase(ext->ptr_);
-    ext->ptr_ = sort_extents_.end();
-  }
-  mu_.Unlock();
-}
-
-void ExtentManager::UnlockExtent(ext_id_t extent_number,
-                                 uint32_t new_approximate_free_bits,
-                                 bool update_free_bits) {
-  MutexLock l(&mu_);
-  UnlockExtentInternal(extent_number, new_approximate_free_bits,
-                       update_free_bits);
-}
-
-void ExtentManager::UnlockExtents(const std::vector<ExtentMetaData> &extents,
-                                  bool update_free_bits) {
-  MutexLock l(&mu_);
-  for (const auto &extent : extents) {
-    UnlockExtentInternal(extent.extent_number_, extent.approximate_free_bits_,
-                         update_free_bits);
-  }
-}
-
-void ExtentManager::UnlockExtentInternal(ext_id_t extent_number,
-                                         uint32_t new_approximate_free_bits,
-                                         bool update_free_bits) {
-  assert(extent_number < next_extent_num_);
-  auto ext = GetExtent(extent_number);
-  if (update_free_bits) {
-    ext->meta_.approximate_free_bits_ = new_approximate_free_bits;
-  }
-  if (ext->meta_.approximate_free_bits_ / double(kTotalFreeBits) >
-      allocatable_threshold_) {
-    auto r = sort_extents_.insert(ext);
-    assert(r.second);
-    ext->ptr_ = r.first;
-  }
-  ext->mu_.Unlock();
-}
-
-auto ExtentManager::GetExtent(ext_id_t extent_number) -> Extent * {
-  size_t pid = extent_number / kExtentPerPage;
-  if (UNLIKELY(pages_.size() <= pid)) {
-    auto ptr = std::aligned_alloc(4096, kPageSize);
-    pages_.push_back(ptr);
-    for (size_t i = 0; i < kExtentPerPage; i++) {
-      new (reinterpret_cast<Extent *>(ptr) + i) Extent();
-    }
-  }
-  return reinterpret_cast<Extent *>(pages_[pid]) +
-         extent_number % kExtentPerPage;
-}
 
 auto HeapFile::Open(UringIoEngine *io_engine, const std::string &filename,
                     uint32_t column_family_id, bool use_direct_io,

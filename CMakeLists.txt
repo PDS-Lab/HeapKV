@@ -683,9 +683,10 @@ set(SOURCES
   db/flush_scheduler.cc
   db/forward_iterator.cc
   db/heap/bitmap_allocator.cc
+  db/heap/extent.cc
   db/heap/heap_alloc_job.cc
   db/heap/heap_file.cc
-  db/heap/heap_free_job.cc
+  db/heap/heap_gc_job.cc
   db/heap/heap_garbage_collector.cc
   db/heap/heap_prefetch_helper.cc
   db/heap/heap_storage.cc

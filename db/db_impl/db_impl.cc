@@ -36,6 +36,7 @@
 #include "db/external_sst_file_ingestion_job.h"
 #include "db/flush_job.h"
 #include "db/forward_iterator.h"
+#include "db/heap/heap_storage.h"
 #include "db/import_column_family_job.h"
 #include "db/job_context.h"
 #include "db/log_reader.h"
@@ -207,7 +208,7 @@ DBImpl::DBImpl(const DBOptions& options, const std::string& dbname,
       bg_flush_scheduled_(0),
       num_running_flushes_(0),
       bg_purge_scheduled_(0),
-      bg_heap_free_scheduled_(0),
+      bg_heap_gc_scheduled_(0),
       disable_delete_obsolete_files_(0),
       pending_purge_obsolete_files_(0),
       delete_obsolete_files_last_run_(immutable_db_options_.clock->NowMicros()),
@@ -557,11 +558,32 @@ Status DBImpl::CloseHelper() {
   // Wait for background work to finish
   while (bg_bottom_compaction_scheduled_ || bg_compaction_scheduled_ ||
          bg_flush_scheduled_ || bg_purge_scheduled_ ||
-         pending_purge_obsolete_files_ || bg_heap_free_scheduled_ ||
+         pending_purge_obsolete_files_ || bg_heap_gc_scheduled_ ||
          error_handler_.IsRecoveryInProgress()) {
     TEST_SYNC_POINT("DBImpl::~DBImpl:WaitJob");
     bg_cv_.Wait();
   }
+  // gc all
+  // TODO(wnj): we can delete this after we can recover from manifest
+  {
+    for (auto cfd : *versions_->GetColumnFamilySet()) {
+      if (cfd->heap_storage() != nullptr) {
+        auto arg = new heapkv::CFHeapStorage::HeapGCArg{
+            .db_ = this,
+            .shutting_down_ = &shutting_down_,
+            .cfd_ = cfd,
+            .storage_ = cfd->heap_storage(),
+            .job_ = nullptr,
+            .force_gc_ = true};
+        env_->Schedule(&BGWorkHeapGCJob, arg);
+        bg_heap_gc_scheduled_++;
+      }
+    }
+    while (bg_heap_gc_scheduled_ > 0) {
+      bg_cv_.Wait();
+    }
+  }
+
   TEST_SYNC_POINT_CALLBACK("DBImpl::CloseHelper:PendingPurgeFinished",
                            &files_grabbed_for_purge_);
   EraseThreadStatusDbInfo();

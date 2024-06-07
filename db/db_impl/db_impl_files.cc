@@ -7,6 +7,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file. See the AUTHORS file for names of contributors.
 #include <cinttypes>
+#include <memory>
 #include <set>
 #include <unordered_set>
 
@@ -397,6 +398,7 @@ void DBImpl::DeleteObsoleteFileImpl(int job_id, const std::string& fname,
         immutable_db_options_.listeners);
     // TODO(wnj): maybe use eventlistener and dont use db mutex.
     mutex_.Lock();
+    // we dont know which column family the file belongs to
     auto cfs = versions_->GetColumnFamilySet();
     for (auto cfd : *cfs) {
       if (cfd->IsDropped()) {
@@ -405,10 +407,15 @@ void DBImpl::DeleteObsoleteFileImpl(int job_id, const std::string& fname,
       if (cfd->heap_storage()) {
         auto job = cfd->heap_storage()->NotifyFileDeletion(number);
         if (job != nullptr) {
-          auto arg = new heapkv::CFHeapStorage::HeapFreeArg{
-              this, cfd, cfd->heap_storage(), std::move(job->garbage_)};
-          env_->Schedule(&BGWorkHeapFreeJob, arg);
-          bg_heap_free_scheduled_++;
+          auto arg = new heapkv::CFHeapStorage::HeapGCArg{
+              .db_ = this,
+              .shutting_down_ = &shutting_down_,
+              .cfd_ = cfd,
+              .storage_ = cfd->heap_storage(),
+              .job_ = std::move(job),
+              .force_gc_ = false};
+          env_->Schedule(&BGWorkHeapGCJob, arg);
+          bg_heap_gc_scheduled_++;
         }
       }
     }

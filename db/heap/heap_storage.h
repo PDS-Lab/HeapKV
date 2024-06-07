@@ -10,10 +10,10 @@
 #include "cache/cache_helpers.h"
 #include "cache/cache_key.h"
 #include "db/column_family.h"
+#include "db/heap/extent.h"
 #include "db/heap/heap_alloc_job.h"
 #include "db/heap/heap_file.h"
-#include "db/heap/heap_free_job.h"
-#include "db/heap/heap_garbage_collector.h"
+#include "db/heap/heap_gc_job.h"
 #include "db/heap/heap_value_index.h"
 #include "db/heap/io_engine.h"
 #include "memory/memory_allocator_impl.h"
@@ -104,20 +104,27 @@ class HeapValueGetContext {
   }
 };
 
+enum class HeapStorageJobType {
+  Alloc,
+  GC,
+};
+
 class CFHeapStorage {
  public:
-  struct PendingHeapFreeJob {
+  struct PendingHeapGarbageCommitJob {
     uint8_t count_down_;
-    std::vector<HeapGarbageCollector::GarbageBlocks> garbage_;
-    PendingHeapFreeJob(uint8_t count_down,
-                       std::vector<HeapGarbageCollector::GarbageBlocks> garbage)
+    std::vector<ExtentGarbageSpan> garbage_;
+    PendingHeapGarbageCommitJob(uint8_t count_down,
+                                std::vector<ExtentGarbageSpan> garbage)
         : count_down_(count_down), garbage_(std::move(garbage)) {}
   };
-  struct HeapFreeArg {
+  struct HeapGCArg {
     DBImpl* db_;
+    std::atomic<bool>* shutting_down_;
     ColumnFamilyData* cfd_;
     CFHeapStorage* storage_;
-    std::vector<HeapGarbageCollector::GarbageBlocks> garbage_;
+    std::shared_ptr<PendingHeapGarbageCommitJob> job_;
+    bool force_gc_;
   };
 
  private:
@@ -125,13 +132,15 @@ class CFHeapStorage {
   CacheKey base_key_;
   bool stop_{false};
   uint64_t next_job_id_{0};
+  uint64_t bg_running_alloc_jobs_{0};
+  uint64_t bg_running_gc_jobs_{0};
   std::shared_ptr<Cache> heap_value_cache_;
   std::unique_ptr<HeapFile> heap_file_;
   std::unique_ptr<ExtentManager> extent_manager_;
 
   port::Mutex mu_;
   port::CondVar cv_;
-  std::unordered_map<uint64_t, std::shared_ptr<PendingHeapFreeJob>>
+  std::unordered_map<uint64_t, std::shared_ptr<PendingHeapGarbageCommitJob>>
       pending_free_jobs_;
   std::unordered_set<uint64_t> running_jobs_;
 
@@ -151,6 +160,8 @@ class CFHeapStorage {
   }
   ~CFHeapStorage() { WaitAllJobDone(); }
 
+  ExtentManager* extent_manager() const { return extent_manager_.get(); }
+
   bool HasCache() const { return heap_value_cache_ != nullptr; }
 
   static Status OpenOrCreate(const std::string& db_name, ColumnFamilyData* cfd,
@@ -161,29 +172,32 @@ class CFHeapStorage {
     {
       MutexLock lg(&mu_);
       jid = next_job_id_++;
+      bg_running_alloc_jobs_++;
       running_jobs_.insert(jid);
     }
     return std::make_unique<HeapAllocJob>(jid, cfd_, extent_manager_.get());
   }
 
-  auto NewFreeJob(std::vector<HeapGarbageCollector::GarbageBlocks> garbage)
-      -> std::unique_ptr<HeapFreeJob> {
+  auto NewGCJob(bool force_gc) -> std::unique_ptr<HeapGCJob> {
     uint64_t jid;
     {
       MutexLock lg(&mu_);
+      if (!force_gc && bg_running_gc_jobs_ > 0) {
+        return nullptr;
+      }
       jid = next_job_id_++;
+      bg_running_gc_jobs_++;
       running_jobs_.insert(jid);
     }
-    return std::make_unique<HeapFreeJob>(jid, cfd_, extent_manager_.get(),
-                                         std::move(garbage));
+    return std::make_unique<HeapGCJob>(jid, cfd_, extent_manager_.get(),
+                                       force_gc);
   }
 
-  void CommitGarbageBlocks(
-      const Compaction& compaction,
-      std::vector<HeapGarbageCollector::GarbageBlocks> garbage);
+  void CommitGarbageBlocks(const Compaction& compaction,
+                           std::vector<ExtentGarbageSpan> garbage);
 
   auto NotifyFileDeletion(uint64_t file_number)
-      -> std::shared_ptr<PendingHeapFreeJob>;
+      -> std::shared_ptr<PendingHeapGarbageCommitJob>;
 
   auto GetHeapValueAsync(const ReadOptions& ro, UringIoEngine* io_engine,
                          const HeapValueIndex& hvi) -> HeapValueGetContext;
@@ -191,7 +205,7 @@ class CFHeapStorage {
                     const HeapValueIndex& hvi, PinnableSlice* value) -> Status;
   auto WaitAsyncGet(const ReadOptions& ro, HeapValueGetContext ctx,
                     PinnableSlice* value) -> Status;
-  void NotifyJobDone(uint64_t job_id);
+  void NotifyJobDone(uint64_t job_id, HeapStorageJobType type);
   void MarkStop();
   void WaitAllJobDone();
 

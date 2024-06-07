@@ -222,15 +222,14 @@ auto CFHeapStorage::WaitAsyncGet(const ReadOptions& ro, HeapValueGetContext ctx,
 }
 
 void CFHeapStorage::CommitGarbageBlocks(
-    const Compaction& compaction,
-    std::vector<HeapGarbageCollector::GarbageBlocks> garbage) {
+    const Compaction& compaction, std::vector<ExtentGarbageSpan> garbage) {
   size_t lvls = compaction.num_input_levels();
   size_t num_files = 0;
   for (size_t i = 0; i < lvls; i++) {
     num_files += compaction.input_levels(i)->num_files;
   }
-  auto job =
-      std::make_shared<PendingHeapFreeJob>(num_files, std::move(garbage));
+  auto job = std::make_shared<PendingHeapGarbageCommitJob>(num_files,
+                                                           std::move(garbage));
   {
     MutexLock lg(&mu_);
     for (size_t l = 0; l < lvls; l++) {
@@ -244,8 +243,8 @@ void CFHeapStorage::CommitGarbageBlocks(
 }
 
 auto CFHeapStorage::NotifyFileDeletion(uint64_t file_number)
-    -> std::shared_ptr<PendingHeapFreeJob> {
-  std::shared_ptr<PendingHeapFreeJob> job = nullptr;
+    -> std::shared_ptr<PendingHeapGarbageCommitJob> {
+  std::shared_ptr<PendingHeapGarbageCommitJob> job = nullptr;
   {
     MutexLock lg(&mu_);
     auto it = pending_free_jobs_.find(file_number);
@@ -259,9 +258,19 @@ auto CFHeapStorage::NotifyFileDeletion(uint64_t file_number)
   return job;
 }
 
-void CFHeapStorage::NotifyJobDone(uint64_t job_id) {
+void CFHeapStorage::NotifyJobDone(uint64_t job_id, HeapStorageJobType type) {
   MutexLock lg(&mu_);
   running_jobs_.erase(job_id);
+  switch (type) {
+    case HeapStorageJobType::Alloc:
+      bg_running_alloc_jobs_--;
+      break;
+    case HeapStorageJobType::GC:
+      bg_running_gc_jobs_--;
+      break;
+    default:
+      assert(false);
+  }
   cv_.SignalAll();
 }
 

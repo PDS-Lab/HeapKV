@@ -41,7 +41,7 @@ HeapAllocJob::~HeapAllocJob() {
     io_engine_->UnregisterFiles();
     registered_ = false;
   }
-  cfd_->heap_storage()->NotifyJobDone(job_id_);
+  cfd_->heap_storage()->NotifyJobDone(job_id_, HeapStorageJobType::Alloc);
 }
 
 Status HeapAllocJob::InitJob() {
@@ -185,7 +185,7 @@ Status HeapAllocJob::Finish(bool commit) {
                    : 0,
     });
   }
-  ext_mgr_->UnlockExtents(exts, commit);
+  ext_mgr_->UnlockExtents(exts, commit, 0);
   ROCKS_LOG_INFO(
       cfd_->ioptions()->info_log,
       "HeapAllocJob::Finish: job_id=%lu, extents_num=%lu, commit=%d, status=%s",

@@ -3,7 +3,7 @@
 #include <cstdint>
 #include <ostream>
 
-#include "db/heap/heap_file.h"
+#include "db/heap/extent.h"
 #include "rocksdb/compression_type.h"
 #include "rocksdb/rocksdb_namespace.h"
 #include "rocksdb/status.h"

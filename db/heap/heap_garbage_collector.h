@@ -2,7 +2,6 @@
 
 #include <vector>
 
-#include "db/heap/heap_file.h"
 #include "db/heap/heap_value_index.h"
 #include "rocksdb/rocksdb_namespace.h"
 #include "table/internal_iterator.h"
@@ -13,22 +12,15 @@ namespace heapkv {
 
 // A class co-work with compaction process to collect dropped HeapValueIndex
 class HeapGarbageCollector {
- public:
-  struct GarbageBlocks {
-    ext_id_t extent_number_;
-    uint32_t block_offset_;
-    uint32_t block_cnt_;
-  };
-
  private:
-  std::vector<GarbageBlocks> dropped_blocks_;
+  std::vector<ExtentGarbageSpan> dropped_blocks_;
   autovector<HeapValueIndex, 16> pending_hvi_;
 
  public:
   Status InputKeyValue(const Slice& key, const Slice& value);
   Status OutputKeyValue(const Slice& key, const Slice& value);
-  auto FinalizeDropResult() -> std::vector<GarbageBlocks>;
-  static void CompactDropResult(std::vector<GarbageBlocks>& garbage);
+  auto FinalizeDropResult() -> std::vector<ExtentGarbageSpan>;
+  static void CompactDropResult(std::vector<ExtentGarbageSpan>& garbage);
 };
 
 // An internal iterator that passes each key-value encountered to

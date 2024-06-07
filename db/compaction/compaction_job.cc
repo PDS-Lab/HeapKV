@@ -1766,7 +1766,7 @@ Status CompactionJob::InstallCompactionResults(
   compaction->AddInputDeletions(edit);
 
   std::unordered_map<uint64_t, BlobGarbageMeter::BlobStats> blob_total_garbage;
-  std::vector<heapkv::HeapGarbageCollector::GarbageBlocks> heap_total_garbage;
+  std::vector<heapkv::ExtentGarbageSpan> heap_total_garbage;
 
   for (const auto& sub_compact : compact_->sub_compact_states) {
     sub_compact.AddOutputsEdit(edit);

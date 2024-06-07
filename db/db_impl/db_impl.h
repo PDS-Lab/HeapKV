@@ -2186,7 +2186,7 @@ class DBImpl : public DB {
   static void BGWorkBottomCompaction(void* arg);
   static void BGWorkFlush(void* arg);
   static void BGWorkPurge(void* arg);
-  static void BGWorkHeapFreeJob(void* arg);
+  static void BGWorkHeapGCJob(void* arg);
   static void UnscheduleCompactionCallback(void* arg);
   static void UnscheduleFlushCallback(void* arg);
   void BackgroundCallCompaction(PrepickedCompaction* prepicked_compaction,
@@ -2714,7 +2714,7 @@ class DBImpl : public DB {
   // number of background obsolete file purge jobs, submitted to the HIGH pool
   int bg_purge_scheduled_;
 
-  int bg_heap_free_scheduled_;
+  int bg_heap_gc_scheduled_;
 
   std::deque<ManualCompactionState*> manual_compaction_dequeue_;
 
