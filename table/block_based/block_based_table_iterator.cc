@@ -8,8 +8,6 @@
 // found in the LICENSE file. See the AUTHORS file for names of contributors.
 #include "table/block_based/block_based_table_iterator.h"
 
-#include "rocksdb/table_reader_caller.h"
-
 namespace ROCKSDB_NAMESPACE {
 
 void BlockBasedTableIterator::SeekToFirst() { SeekImpl(nullptr, false); }
@@ -29,8 +27,6 @@ void BlockBasedTableIterator::SeekSecondPass(const Slice* target) {
   FindKeyForward();
 
   CheckOutOfBound();
-
-  PrefetchIfNeed();
 
   if (target) {
     assert(!Valid() || icomp_.Compare(*target, key()) <= 0);
@@ -168,8 +164,6 @@ void BlockBasedTableIterator::SeekImpl(const Slice* target,
 
   CheckOutOfBound();
 
-  PrefetchIfNeed();
-
   if (target) {
     assert(!Valid() || icomp_.Compare(*target, key()) <= 0);
   }
@@ -280,7 +274,6 @@ void BlockBasedTableIterator::Next() {
   block_iter_.Next();
   FindKeyForward();
   CheckOutOfBound();
-  PrefetchIfNeed();
 }
 
 bool BlockBasedTableIterator::NextAndGetResult(IterateResult* result) {
@@ -670,14 +663,6 @@ void BlockBasedTableIterator::CheckOutOfBound() {
             *read_options_.iterate_upper_bound, /*a_has_ts=*/false, user_key(),
             /*b_has_ts=*/true) <= 0;
   }
-}
-
-void BlockBasedTableIterator::PrefetchIfNeed() {
-  if (lookup_context_.caller != TableReaderCaller::kUserIterator) {
-    return;
-  }
-  heap_prefetcher_.PrefetchToCache(index_iter_.get(), &block_iter_);
-  heap_prefetcher_.WaitPrefetch(&block_iter_);
 }
 
 void BlockBasedTableIterator::CheckDataBlockWithinUpperBound() {

@@ -745,17 +745,6 @@ class DataBlockIter final : public BlockIter<Slice> {
     prev_entries_idx_ = -1;
   }
 
-  bool IsHeapValueIndex() const { return is_heap_value_index_; }
-  uint32_t HeapValueIndexOffset() const { return hvi_offset_; }
-  std::optional<Slice> GetHeapValueIndex(uint32_t offset) const {
-    if (offset >= num_heap_value_indices_) {
-      return std::nullopt;
-    }
-    return Slice(data_ + heap_value_indices_offset_ +
-                     offset * heapkv::HeapValueIndex::IndexSize,
-                 heapkv::HeapValueIndex::IndexSize);
-  }
-
  protected:
   friend Block;
   inline bool ParseNextDataKey(bool* is_shared);

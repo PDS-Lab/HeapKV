@@ -579,9 +579,9 @@ ColumnFamilyData::ColumnFamilyData(
   if (_dummy_versions != nullptr) {
     internal_stats_.reset(
         new InternalStats(ioptions_.num_levels, ioptions_.clock, this));
-    table_cache_.reset(new TableCache(this, ioptions_, file_options,
-                                      _table_cache, block_cache_tracer,
-                                      io_tracer, db_session_id));
+    table_cache_.reset(new TableCache(ioptions_, file_options, _table_cache,
+                                      block_cache_tracer, io_tracer,
+                                      db_session_id));
     blob_file_cache_.reset(
         new BlobFileCache(_table_cache, ioptions(), soptions(), id_,
                           internal_stats_->GetBlobFileReadHist(), io_tracer));

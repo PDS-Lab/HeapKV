@@ -146,8 +146,7 @@ void TableReaderBenchmark(Options& opts, EnvOptions& env_options,
         new RandomAccessFileReader(std::move(raf), file_name));
     s = opts.table_factory->NewTableReader(
         TableReaderOptions(ioptions, moptions.prefix_extractor, env_options,
-                           ikc, 0 /* block_protection_bytes_per_key */,
-                           nullptr),
+                           ikc, 0 /* block_protection_bytes_per_key */),
         std::move(file_reader), file_size, &table_reader);
     if (!s.ok()) {
       fprintf(stderr, "Open Table Error: %s\n", s.ToString().c_str());
@@ -178,11 +177,10 @@ void TableReaderBenchmark(Options& opts, EnvOptions& env_options,
             MergeContext merge_context;
             SequenceNumber max_covering_tombstone_seq = 0;
             GetContext get_context(
-                read_options, ioptions.user_comparator,
-                ioptions.merge_operator.get(), ioptions.logger, ioptions.stats,
-                GetContext::kNotFound, Slice(key), &value, /*columns=*/nullptr,
-                /*timestamp=*/nullptr, &merge_context, true,
-                &max_covering_tombstone_seq, clock);
+                ioptions.user_comparator, ioptions.merge_operator.get(),
+                ioptions.logger, ioptions.stats, GetContext::kNotFound,
+                Slice(key), &value, /*columns=*/nullptr, /*timestamp=*/nullptr,
+                &merge_context, true, &max_covering_tombstone_seq, clock);
             s = table_reader->Get(read_options, key, &get_context, nullptr);
           } else {
             s = db->Get(read_options, key, &result);

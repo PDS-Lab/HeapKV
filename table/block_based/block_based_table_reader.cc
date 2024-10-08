@@ -569,7 +569,6 @@ Status BlockBasedTable::Open(
     const ReadOptions& read_options, const ImmutableOptions& ioptions,
     const EnvOptions& env_options, const BlockBasedTableOptions& table_options,
     const InternalKeyComparator& internal_comparator,
-    heapkv::CFHeapStorage* heap_storage,
     std::unique_ptr<RandomAccessFileReader>&& file, uint64_t file_size,
     uint8_t block_protection_bytes_per_key,
     std::unique_ptr<TableReader>* table_reader, uint64_t tail_size,
@@ -643,9 +642,8 @@ Status BlockBasedTable::Open(
 
   BlockCacheLookupContext lookup_context{TableReaderCaller::kPrefetch};
   Rep* rep = new BlockBasedTable::Rep(
-      ioptions, env_options, table_options, internal_comparator, heap_storage,
-      skip_filters, file_size, level, immortal_table,
-      user_defined_timestamps_persisted);
+      ioptions, env_options, table_options, internal_comparator, skip_filters,
+      file_size, level, immortal_table, user_defined_timestamps_persisted);
   rep->file = std::move(file);
   rep->footer = footer;
 
