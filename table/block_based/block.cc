@@ -12,13 +12,11 @@
 #include "table/block_based/block.h"
 
 #include <algorithm>
-#include <cstdint>
 #include <string>
 #include <unordered_map>
 #include <vector>
 
 #include "db/dbformat.h"
-#include "db/heap/heap_value_index.h"
 #include "monitoring/perf_context_imp.h"
 #include "port/port.h"
 #include "port/stack_trace.h"
@@ -27,7 +25,6 @@
 #include "table/block_based/data_block_footer.h"
 #include "table/format.h"
 #include "util/coding.h"
-#include "util/coding_lean.h"
 
 namespace ROCKSDB_NAMESPACE {
 
@@ -640,23 +637,19 @@ void IndexBlockIter::SeekToLastImpl() {
 template <class TValue>
 template <typename DecodeEntryFunc>
 bool BlockIter<TValue>::ParseNextKey(bool* is_shared) {
-  is_heap_value_index_ = false;
   current_ = NextEntryOffset();
   const char* p = data_ + current_;
-  const char* entry_limit =
-      data_ + heap_value_indices_offset_;  // hvi offsetss come right after data
-  const char* data_limit = data_ + restarts_;
+  const char* limit = data_ + restarts_;  // Restarts come right after data
 
-  if (p >= entry_limit) {
+  if (p >= limit) {
     // No more entries to return.  Mark as invalid.
     current_ = restarts_;
     restart_index_ = num_restarts_;
     return false;
   }
   // Decode next entry
-  uint32_t shared, non_shared, hvi_offset_or_value_length;
-  p = DecodeEntryFunc()(p, data_limit, &shared, &non_shared,
-                        &hvi_offset_or_value_length);
+  uint32_t shared, non_shared, value_length;
+  p = DecodeEntryFunc()(p, limit, &shared, &non_shared, &value_length);
   if (p == nullptr || raw_key_.Size() < shared) {
     CorruptionError();
     return false;
@@ -680,17 +673,7 @@ bool BlockIter<TValue>::ParseNextKey(bool* is_shared) {
         raw_key_.TrimAppend(shared, p, non_shared);
       }
     }
-
-    is_heap_value_index_ =
-        num_heap_value_indices_ > 0 &&
-        ExtractValueType(raw_key_.GetInternalKey()) == kTypeHeapValueIndex;
-    if (is_heap_value_index_) {
-      hvi_offset_ = hvi_offset_or_value_length;
-      value_ = Slice(p + non_shared, 0);
-    } else {
-      value_ = Slice(p + non_shared, hvi_offset_or_value_length);
-    }
-
+    value_ = Slice(p + non_shared, value_length);
     if (shared == 0) {
       while (restart_index_ + 1 < num_restarts_ &&
              GetRestartPoint(restart_index_ + 1) < current_) {
@@ -1122,11 +1105,6 @@ Block::Block(BlockContents&& contents, size_t read_amp_bytes_per_bit,
       default:
         size_ = 0;  // Error marker
     }
-    num_heap_value_indices_ =
-        DecodeFixed32(data_ + restart_offset_ - sizeof(uint32_t));
-    heap_value_indices_offset_ =
-        restart_offset_ - sizeof(uint32_t) -
-        num_heap_value_indices_ * heapkv::HeapValueIndex::IndexSize;
   }
   if (read_amp_bytes_per_bit != 0 && statistics && size_ != 0) {
     read_amp_bitmap_.reset(new BlockReadAmpBitmap(
@@ -1270,7 +1248,6 @@ MetaBlockIter* Block::NewMetaIterator(bool block_contents_pinned) {
     iter->Invalidate(Status::OK());
   } else {
     iter->Initialize(data_, restart_offset_, num_restarts_,
-                     heap_value_indices_offset_, num_heap_value_indices_,
                      block_contents_pinned, protection_bytes_per_key_,
                      kv_checksum_, block_restart_interval_);
   }
@@ -1298,8 +1275,7 @@ DataBlockIter* Block::NewDataIterator(const Comparator* raw_ucmp,
     return ret_iter;
   } else {
     ret_iter->Initialize(
-        raw_ucmp, data_, restart_offset_, num_restarts_,
-        heap_value_indices_offset_, num_heap_value_indices_, global_seqno,
+        raw_ucmp, data_, restart_offset_, num_restarts_, global_seqno,
         read_amp_bitmap_.get(), block_contents_pinned,
         user_defined_timestamps_persisted,
         data_block_hash_index_.Valid() ? &data_block_hash_index_ : nullptr,
@@ -1339,8 +1315,7 @@ IndexBlockIter* Block::NewIndexIterator(
     BlockPrefixIndex* prefix_index_ptr =
         total_order_seek ? nullptr : prefix_index;
     ret_iter->Initialize(
-        raw_ucmp, data_, restart_offset_, num_restarts_,
-        heap_value_indices_offset_, num_heap_value_indices_, global_seqno,
+        raw_ucmp, data_, restart_offset_, num_restarts_, global_seqno,
         prefix_index_ptr, have_first_key, key_includes_seq, value_is_full,
         block_contents_pinned, user_defined_timestamps_persisted,
         protection_bytes_per_key_, kv_checksum_, block_restart_interval_);
