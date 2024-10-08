@@ -15,7 +15,6 @@
 #include <cstdio>
 #include <list>
 #include <map>
-#include <set>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -23,7 +22,6 @@
 #include "db/blob/blob_fetcher.h"
 #include "db/blob/blob_file_cache.h"
 #include "db/blob/blob_file_reader.h"
-#include "db/blob/blob_log_format.h"
 #include "db/blob/blob_source.h"
 #include "db/compaction/compaction.h"
 #include "db/compaction/file_pri.h"
@@ -60,7 +58,6 @@
 #include "logging/logging.h"
 #include "monitoring/file_read_sample.h"
 #include "monitoring/perf_context_imp.h"
-#include "monitoring/persistent_stats_history.h"
 #include "options/options_helper.h"
 #include "rocksdb/env.h"
 #include "rocksdb/merge_operator.h"
@@ -74,10 +71,8 @@
 #include "table/plain/plain_table_factory.h"
 #include "table/table_reader.h"
 #include "table/two_level_iterator.h"
-#include "table/unique_id_impl.h"
 #include "test_util/sync_point.h"
 #include "util/cast_util.h"
-#include "util/coding.h"
 #include "util/coro_utils.h"
 #include "util/stop_watch.h"
 #include "util/string_util.h"
@@ -99,7 +94,8 @@
 namespace ROCKSDB_NAMESPACE {
 
 namespace {
-
+// static std::atomic_uint64_t get_blob_time_use{0};
+// static std::atomic_uint64_t get_blob_count{0};
 // Find File in LevelFilesBrief data structure
 // Within an index range defined by left and right
 int FindFileInRange(const InternalKeyComparator& icmp,
@@ -2538,7 +2534,15 @@ void Version::Get(const ReadOptions& read_options, const LookupKey& k,
               value ? *value
                     : WideColumnsHelper::GetDefaultColumn(columns->columns());
           PinnableSlice result;
+          // auto start = std::chrono::steady_clock::now();
           *status = GetHeapValue(read_options, heap_value_index, &result);
+          // auto end = std::chrono::steady_clock::now();
+          // get_blob_count.fetch_add(1, std::memory_order_relaxed);
+          // get_blob_time_use.fetch_add(
+          //     std::chrono::duration_cast<std::chrono::nanoseconds>(end -
+          //     start)
+          //         .count(),
+          //     std::memory_order_relaxed);
           if (!status->ok()) {
             if (status->IsIncomplete()) {
               get_context.MarkKeyMayExist();
@@ -5240,6 +5244,10 @@ VersionSet::~VersionSet() {
   }
   obsolete_files_.clear();
   io_status_.PermitUncheckedError();
+  // if (get_blob_count > 0) {
+  //   std::cout << "get blob time use avg: "
+  //             << get_blob_time_use / get_blob_count / 1000 << std::endl;
+  // }
 }
 
 void VersionSet::Reset() {
