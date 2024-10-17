@@ -8,20 +8,23 @@
 // found in the LICENSE file. See the AUTHORS file for names of contributors.
 
 #pragma once
+#include <cassert>
 #include <cstdint>
 #include <string>
 
 #include "db/db_impl/db_impl.h"
 #include "db/dbformat.h"
-#include "db/range_del_aggregator.h"
-#include "memory/arena.h"
+#include "db/heap/heap_iter_prefetch.h"
+#include "db/heap/heap_storage.h"
+#include "db/heap/io_engine.h"
 #include "options/cf_options.h"
 #include "rocksdb/db.h"
 #include "rocksdb/iterator.h"
+#include "rocksdb/options.h"
 #include "rocksdb/slice.h"
+#include "rocksdb/status.h"
 #include "rocksdb/wide_columns.h"
 #include "table/iterator_wrapper.h"
-#include "util/autovector.h"
 
 namespace ROCKSDB_NAMESPACE {
 class Version;
@@ -58,6 +61,8 @@ class Version;
 // representation into a single entry while accounting for sequence
 // numbers, deletion markers, overwrites, etc.
 class DBIter final : public Iterator {
+  friend class HeapPrefetchDBIter;
+
  public:
   // The following is grossly complicated. TODO: clean it up
   // Which direction is the iterator currently moving?
@@ -199,6 +204,7 @@ class DBIter final : public Iterator {
     assert(valid_);
     return is_blob_;
   }
+  bool IsHeapValue() const { return is_heap_value_; }
 
   Status GetProperty(std::string prop_name, std::string* prop) override;
 
@@ -312,10 +318,7 @@ class DBIter final : public Iterator {
 
   bool SetHeapValue(const Slice& heap_value_index);
 
-  void ResetHeapValue() {
-    is_heap_value_ = false;
-    heap_value_.Reset();
-  }
+  void ResetHeapValue() { is_heap_value_ = false; }
 
   void SetValueAndColumnsFromPlain(const Slice& slice) {
     assert(value_.empty());
@@ -380,7 +383,6 @@ class DBIter final : public Iterator {
   Slice pinned_value_;
   // for prefix seek mode to support prev()
   PinnableSlice blob_value_;
-  PinnableSlice heap_value_;
   // Value of the default column
   Slice value_;
   // All columns (i.e. name-value pairs)
@@ -434,6 +436,76 @@ class DBIter final : public Iterator {
   const Slice* const timestamp_lb_;
   const size_t timestamp_size_;
   std::string saved_timestamp_;
+};
+
+class HeapPrefetchDBIter final : public Iterator {
+ private:
+  const size_t kMaxPrefetchCount = 10;
+  struct PrefetchCtx {
+    std::string key_;
+    std::string value_;
+    heapkv::HeapValueGetContext get_ctx_;
+  };
+
+ private:
+  const ReadOptions ro_;
+  DBIter db_iter_;
+  mutable PinnableSlice heap_value_;  // tmp use while prefetch is disabled
+  const bool enable_heap_prefetch;
+  heapkv::UringIoEngine* io_engine_;
+  Status status_{};
+  heapkv::HeapIterPrefetcher prefetcher_;
+
+ public:
+  HeapPrefetchDBIter(Env* _env, const ReadOptions& read_options,
+                     const ImmutableOptions& ioptions,
+                     const MutableCFOptions& mutable_cf_options,
+                     const Comparator* cmp, InternalIterator* iter,
+                     const Version* version, SequenceNumber s, bool arena_mode,
+                     uint64_t max_sequential_skip_in_iterations,
+                     ReadCallback* read_callback, DBImpl* db_impl,
+                     ColumnFamilyData* cfd, bool expose_blob_index)
+      : ro_(read_options),
+        db_iter_(_env, read_options, ioptions, mutable_cf_options, cmp, iter,
+                 version, s, arena_mode, max_sequential_skip_in_iterations,
+                 read_callback, db_impl, cfd, expose_blob_index),
+        enable_heap_prefetch(ioptions.enable_heapkv &&
+                             read_options.enable_heap_prefetch),
+        io_engine_(heapkv::GetThreadLocalIoEngine()),
+        prefetcher_(read_options, cfd->heap_storage(), &db_iter_) {}
+  // No copying allowed
+  HeapPrefetchDBIter(const HeapPrefetchDBIter&) = delete;
+  void operator=(const HeapPrefetchDBIter&) = delete;
+
+  ~HeapPrefetchDBIter() override {}
+  void SetIter(InternalIterator* iter) { db_iter_.SetIter(iter); }
+  bool Valid() const override {
+    return enable_heap_prefetch ? prefetcher_.Valid() : db_iter_.Valid();
+  }
+  Slice key() const override;
+  Slice value() const override;
+  const WideColumns& columns() const override { return db_iter_.columns(); }
+  Status status() const override {
+    return status_.ok() ? db_iter_.status() : status_;
+  }
+  Slice timestamp() const override;
+  bool IsBlob() const { return false; }
+  // bool IsHeapValue() const { return is_heap_value_; }
+  Status GetProperty(std::string prop_name, std::string* prop) override {
+    return db_iter_.GetProperty(std::move(prop_name), prop);
+  }
+
+  void Next() final override;
+  void Prev() final override;
+  // 'target' does not contain timestamp, even if user timestamp feature is
+  // enabled.
+  void Seek(const Slice& target) final override;
+  void SeekForPrev(const Slice& target) final override;
+  void SeekToFirst() final override;
+  void SeekToLast() final override;
+  Env* env() const { return db_iter_.env_; }
+  void set_sequence(uint64_t s) { db_iter_.set_sequence(s); }
+  void set_valid(bool v) { db_iter_.valid_ = v; }
 };
 
 // Return a new iterator that converts internal keys (yielded by

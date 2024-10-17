@@ -9,6 +9,7 @@
 
 #include "db/arena_wrapped_db_iter.h"
 
+#include "db/db_iter.h"
 #include "memory/arena.h"
 #include "rocksdb/env.h"
 #include "rocksdb/iterator.h"
@@ -45,12 +46,12 @@ void ArenaWrappedDBIter::Init(
     const SequenceNumber& sequence, uint64_t max_sequential_skip_in_iteration,
     uint64_t version_number, ReadCallback* read_callback, DBImpl* db_impl,
     ColumnFamilyData* cfd, bool expose_blob_index, bool allow_refresh) {
-  auto mem = arena_.AllocateAligned(sizeof(DBIter));
-  db_iter_ =
-      new (mem) DBIter(env, read_options, ioptions, mutable_cf_options,
-                       ioptions.user_comparator, /* iter */ nullptr, version,
-                       sequence, true, max_sequential_skip_in_iteration,
-                       read_callback, db_impl, cfd, expose_blob_index);
+  auto mem = arena_.AllocateAligned(sizeof(HeapPrefetchDBIter));
+  db_iter_ = new (mem)
+      HeapPrefetchDBIter(env, read_options, ioptions, mutable_cf_options,
+                         ioptions.user_comparator, /* iter */ nullptr, version,
+                         sequence, true, max_sequential_skip_in_iteration,
+                         read_callback, db_impl, cfd, expose_blob_index);
   sv_number_ = version_number;
   read_options_ = read_options;
   allow_refresh_ = allow_refresh;
@@ -81,7 +82,7 @@ Status ArenaWrappedDBIter::Refresh(const Snapshot* snapshot) {
   TEST_SYNC_POINT("ArenaWrappedDBIter::Refresh:2");
   auto reinit_internal_iter = [&]() {
     Env* env = db_iter_->env();
-    db_iter_->~DBIter();
+    db_iter_->~HeapPrefetchDBIter();
     arena_.~Arena();
     new (&arena_) Arena();
 

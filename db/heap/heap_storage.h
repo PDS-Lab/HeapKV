@@ -32,7 +32,7 @@ namespace heapkv {
 class HeapValueCacheKey : private CacheKey {
  private:
   // seqnumber of the key as we do in-place update in heapfile
-  [[maybe_unused]] SequenceNumber seq_;
+  SequenceNumber seq_;
   ext_id_t ext_id_;
   uint32_t block_offset_;
 
@@ -96,7 +96,11 @@ class HeapValueGetContext {
   HeapValueGetContext& operator=(const HeapValueGetContext&) = delete;
   HeapValueGetContext(HeapValueGetContext&&) = default;
   HeapValueGetContext& operator=(HeapValueGetContext&&) = default;
-  ~HeapValueGetContext() = default;
+  ~HeapValueGetContext() {
+    if (future_ != nullptr) {
+      future_->Wait();
+    }
+  };
   Status status() { return status_; }
   const HeapValueIndex& heap_value_index() const { return hvi_; }
   void SetCacheHandle(Cache* cache, Cache::Handle* handle) {

@@ -37,7 +37,7 @@ class ArenaWrappedDBIter : public Iterator {
  public:
   ~ArenaWrappedDBIter() override {
     if (db_iter_ != nullptr) {
-      db_iter_->~DBIter();
+      db_iter_->~HeapPrefetchDBIter();
     } else {
       assert(false);
     }
@@ -101,7 +101,7 @@ class ArenaWrappedDBIter : public Iterator {
   }
 
  private:
-  DBIter* db_iter_ = nullptr;
+  HeapPrefetchDBIter* db_iter_ = nullptr;
   Arena arena_;
   uint64_t sv_number_;
   ColumnFamilyData* cfd_ = nullptr;
