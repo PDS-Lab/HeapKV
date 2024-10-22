@@ -32,7 +32,7 @@ namespace heapkv {
 class HeapValueCacheKey : private CacheKey {
  private:
   // seqnumber of the key as we do in-place update in heapfile
-  [[maybe_unused]] SequenceNumber seq_;
+  SequenceNumber seq_;
   ext_id_t ext_id_;
   uint32_t block_offset_;
 
