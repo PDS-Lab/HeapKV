@@ -49,6 +49,23 @@ constexpr static inline uint8_t LeadingZero(T x) {
   }
 }
 
+template <typename T>
+constexpr static inline uint8_t ZeroCount(T x) {
+  if constexpr (std::is_same_v<T, uint64_t>) {
+    return 64 - __builtin_popcountll(x);
+  } else if constexpr (std::is_same_v<T, uint32_t>) {
+    return 32 - __builtin_popcount(x);
+  } else if constexpr (std::is_same_v<T, uint16_t>) {
+    return 16 - __builtin_popcount(x);
+  } else if constexpr (std::is_same_v<T, uint8_t>) {
+    return 8 - __builtin_popcount(x);
+  } else {
+    static_assert(std::is_same_v<T, uint64_t> || std::is_same_v<T, uint32_t> ||
+                      std::is_same_v<T, uint16_t> || std::is_same_v<T, uint8_t>,
+                  "T must be uint64_t, uint32_t, uint16_t or uint8_t");
+  }
+}
+
 constexpr static inline uint64_t align_up(uint64_t x, uint64_t align) {
   return (x + align - 1) & ~(align - 1);
 }

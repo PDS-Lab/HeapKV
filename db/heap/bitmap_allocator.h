@@ -93,6 +93,68 @@ class BitMapAllocator {
   }
 };
 
+class BitMapAllocatorV3 {
+ private:
+  // [start, end)
+  struct Segment {
+    uint32_t start{0};
+    uint32_t end{0};
+    Segment() = default;
+    Segment(uint32_t s, uint32_t e) : start(s), end(e) {}
+    uint32_t size() const { return end - start; }
+    auto operator<(const Segment &other) const { return size() < other.size(); }
+  };
+
+ private:
+  uint32_t size_{0};  // size in bytes
+  Segment current_alloc_seg_{};
+  uint32_t total_free_bits_{0};
+  // we might need to access raw data in priority queue in the future, so we use
+  // vector with heap operations
+  std::vector<Segment> free_list_;
+  uint8_t *bm_{nullptr};
+
+ public:
+  BitMapAllocatorV3() = default;
+
+  void Reset() {
+    size_ = 0;
+    current_alloc_seg_ = Segment{};
+    total_free_bits_ = 0;
+    free_list_.clear();
+    bm_ = nullptr;
+  }
+
+  void Init(uint32_t size, uint8_t *bm, bool empty_hint = false);
+
+  int32_t Alloc(uint32_t n);
+
+  uint32_t TotalFreeBits() const { return total_free_bits_; }
+
+  uint32_t MaxContiguousFreeBits() const {
+    return std::max(current_alloc_seg_.size(),
+                    free_list_.empty() ? 0 : free_list_.front().size());
+  }
+
+  static uint32_t CalcApproximateFreeBits(const uint8_t *bm, uint32_t size);
+
+ private:
+  Segment PopHeap() {
+    if (free_list_.empty()) {
+      return {};
+    }
+    std::pop_heap(free_list_.begin(), free_list_.end());
+    auto seg = free_list_.back();
+    free_list_.pop_back();
+    return seg;
+  }
+
+  void PushHeap(Segment seg) {
+    free_list_.push_back(seg);
+    std::push_heap(free_list_.begin(), free_list_.end());
+  }
+};
+
 // struct BI {
 //   uint16_t zero_count : 4;
 //   uint16_t left_zero : 4;
