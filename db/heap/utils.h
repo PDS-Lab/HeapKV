@@ -12,6 +12,8 @@
 #include "rocksdb/rocksdb_namespace.h"
 #include "sys/syscall.h"
 
+#define HEAPKV_NS_V2 ROCKSDB_NAMESPACE::heapkv::v2
+
 namespace ROCKSDB_NAMESPACE {
 namespace heapkv {
 
