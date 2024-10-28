@@ -8,6 +8,7 @@
 #include "db/heap/io_engine.h"
 #include "db/heap/utils.h"
 #include "db/heap/v2/extent.h"
+#include "db/heap/v2/extent_storage.h"
 #include "db/heap/v2/heap_value_index.h"
 #include "rocksdb/status.h"
 
@@ -15,26 +16,27 @@ namespace HEAPKV_NS_V2 {
 
 class ExtentAllocCtx {
  private:
-  const ExtentFileName fn_;
-  uint32_t base_alloc_block_off_;
+  ExtentMeta* meta_;
+  ExtentFileName fn_;
+  uint32_t alloc_off_;
   uint32_t cursor_;
   std::shared_ptr<ExtentFile> file_;
-  std::vector<ValueAddr> value_index_block_;
+  ExtentValueIndex value_index_block_;
 
  public:
-  ExtentAllocCtx(const ExtentFileName fn, uint32_t base_alloc_block_off_,
-                 std::shared_ptr<ExtentFile> file,
-                 const Slice& value_index_block);
+  static Status FromMeta(UringIoEngine* io_engine, ExtentStorage* storage,
+                         ExtentMeta* meta,
+                         std::unique_ptr<ExtentAllocCtx>* ctx);
+  ExtentAllocCtx(ExtentMeta* meta, const Slice& value_index_block);
+  ExtentMeta* meta() { return meta_; }
   ExtentFileName file_name() const { return fn_; }
   ExtentFile* file() const { return file_.get(); }
-  uint32_t cur_b_off() const { return base_alloc_block_off_; }
+  uint32_t cur_b_off() const { return alloc_off_; }
   ValueAddr GetAddr(uint32_t value_index) const {
     return value_index_block_[value_index];
   }
   std::optional<uint32_t> Alloc(uint16_t b_cnt);
-  size_t value_index_block_size() const {
-    return align_up(value_index_block_.size() * sizeof(ValueAddr), kBlockSize);
-  }
+  const ExtentValueIndex& value_index() const { return value_index_block_; }
 };
 
 class HeapAllocJob {

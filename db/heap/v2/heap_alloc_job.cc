@@ -10,6 +10,7 @@
 #include <optional>
 
 #include "db/heap/io_engine.h"
+#include "db/heap/utils.h"
 #include "db/heap/v2/extent.h"
 #include "db/heap/v2/extent_storage.h"
 #include "rocksdb/compression_type.h"
@@ -19,14 +20,12 @@
 
 namespace HEAPKV_NS_V2 {
 
-ExtentAllocCtx::ExtentAllocCtx(const ExtentFileName fn,
-                               uint32_t base_alloc_block_off,
-                               std::shared_ptr<ExtentFile> file,
-                               const Slice& value_index_block)
-    : fn_(fn),
-      base_alloc_block_off_(base_alloc_block_off),
+ExtentAllocCtx::ExtentAllocCtx(ExtentMeta* meta, const Slice& value_index_block)
+    : meta_(meta),
+      fn_(meta->fn_),
+      alloc_off_(meta->base_alloc_block_off_),
       cursor_(0),
-      file_(std::move(file)) {
+      file_(meta->GetExtentFile()) {
   size_t n = value_index_block.size() / sizeof(ValueAddr);
   value_index_block_.reserve(n);
   const char* cur = value_index_block.data();
@@ -35,8 +34,22 @@ ExtentAllocCtx::ExtentAllocCtx(const ExtentFileName fn,
   }
 }
 
+Status ExtentAllocCtx::FromMeta(UringIoEngine* io_engine,
+                                ExtentStorage* storage, ExtentMeta* meta,
+                                std::unique_ptr<ExtentAllocCtx>* ctx) {
+  PinnableSlice value_index_block;
+  auto file = meta->GetExtentFile();
+  Status s =
+      storage->GetValueIndexBlock(io_engine, meta, &file, &value_index_block);
+  if (!s.ok()) {
+    return s;
+  }
+  *ctx = std::make_unique<ExtentAllocCtx>(meta, value_index_block);
+  return Status::OK();
+}
+
 std::optional<uint32_t> ExtentAllocCtx::Alloc(uint16_t b_cnt) {
-  if (base_alloc_block_off_ + uint32_t(b_cnt) > kExtentBlockNum) {
+  if (alloc_off_ + uint32_t(b_cnt) > kExtentBlockNum) {
     return std::nullopt;
   }
   while (cursor_ < value_index_block_.size() &&
@@ -46,9 +59,9 @@ std::optional<uint32_t> ExtentAllocCtx::Alloc(uint16_t b_cnt) {
   if (cursor_ == value_index_block_.size()) {
     value_index_block_.emplace_back();
   }
-  ValueAddr va(base_alloc_block_off_, b_cnt);
+  ValueAddr va(alloc_off_, b_cnt);
   value_index_block_[cursor_] = va;
-  base_alloc_block_off_ += b_cnt;
+  alloc_off_ += b_cnt;
   uint32_t value_index = cursor_;
   cursor_++;
   return value_index;
@@ -115,34 +128,39 @@ Status HeapAllocJob::Finish(bool commit) {
                              strerror(-future_->Result()));
     }
   }
-  if (!commit) {
-    return s;
-  }
-  std::vector<std::unique_ptr<UringCmdFuture>> write_meta_future;
-  write_meta_future.reserve(locked_extents_.size());
-  size_t buf_size = 0;
-  for (auto& ctx : locked_extents_) {
-    buf_size += kBlockSize + ctx->value_index_block_size();
-  }
-  void* buf = std::aligned_alloc(kBlockSize, buf_size);
-  // std::unique_ptr<void*, decltype(std::free)> g(buf, std::free);
-  auto g = std::unique_ptr<void*, decltype(std::free)*>(buf, std::free);
-  for (auto& ctx : locked_extents_) {
-    // TODO
-  }
-  for (auto& f : write_meta_future) {
-    f->Wait();
-    if (f->Result() < 0) {
-      return Status::IOError("update file meta failed", strerror(-f->Result()));
+  if (s.ok() && commit) {
+    // 1. prepare buffer
+    size_t max_buf_size = 0;
+    for (auto& ctx : locked_extents_) {
+      max_buf_size += std::max(
+          max_buf_size,
+          kBlockSize + ExtentFile::CalcValueIndexSize(ctx->value_index()));
+    }
+    void* buf = std::aligned_alloc(kBlockSize, max_buf_size);
+    if (buf == nullptr) {
+      s = Status::MemoryLimit("no enough memory to write meta");
+    }
+    if (s.ok()) {
+      auto g = finally([buf = buf]() { free(buf); });
+      // 2. generate meta, index and write
+      for (auto& ctx : locked_extents_) {
+        s = ctx->file()->UpdateAferAlloc(
+            io_engine_, ctx->meta(), ctx->cur_b_off(), ctx->value_index(), buf);
+        if (!s.ok()) {
+          break;
+        }
+        cfd_->extent_storage()->EvictValueIndexCache(ctx->file_name());
+      }
     }
   }
+  // 3. unlock extent
   for (auto& ctx : locked_extents_) {
     cfd_->extent_storage()->FreeExtentAfterAlloc(
-        ctx->file_name(),
-        kExtentDataSize + kBlockSize + ctx->value_index_block_size(),
-        ctx->cur_b_off());
+        ctx->file_name(), commit && s.ok()
+                              ? ctx->cur_b_off()
+                              : ctx->meta()->base_alloc_block_off_);
   }
-  return Status::OK();
+  return s;
 }
 
 Status HeapAllocJob::AllocSpace(uint16_t b_cnt, uint32_t* value_index,
@@ -161,14 +179,12 @@ Status HeapAllocJob::AllocSpace(uint16_t b_cnt, uint32_t* value_index,
     if (!s.ok()) {
       return s;
     }
-    s = cfd_->extent_storage()->GetValueIndexBlock(io_engine_,
-                                                   meta->file_.get(), &index);
+    std::unique_ptr<ExtentAllocCtx> ctx;
+    s = ExtentAllocCtx::FromMeta(io_engine_, cfd_->extent_storage(), meta,
+                                 &ctx);
     if (!s.ok()) {
       return s;
     }
-    // add to locked list
-    auto ctx = std::make_unique<ExtentAllocCtx>(
-        meta->fn_, meta->base_alloc_block_off_, meta->file_, index);
     locked_extents_.push_back(std::move(ctx));
     return Status::OK();
   };

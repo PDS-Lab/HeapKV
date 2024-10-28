@@ -4,8 +4,10 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
+#include <atomic>
 #include <cerrno>
-// #include <cstdint>
+#include <cstddef>
+#include <cstdint>
 #include <cstring>
 #include <memory>
 
@@ -13,28 +15,29 @@
 #include "rocksdb/status.h"
 // #include "util/coding_lean.h"
 // #include "util/hash.h"
-// #include "util/xxhash.h"
+#include "util/coding_lean.h"
+#include "util/hash.h"
+#include "util/xxhash.h"
 
 namespace HEAPKV_NS_V2 {
 
-// void ExtentMeta::EncodeTo(char* buf) {
-//   memset(buf, 0, kBlockSize);
-//   EncodeFixed32(buf + 4, value_index_checksum_);
-//   EncodeFixed32(buf + 8, base_alloc_block_off_);
-//   uint32_t checksum = Lower32of64(XXH3_64bits(buf + 4, kBlockSize - 4));
-//   EncodeFixed32(buf, checksum);
-// }
-
-// Status ExtentMeta::DecodeFrom(char* buf) {
-//   uint32_t checksum_from_disk = DecodeFixed32(buf);
-//   uint32_t checksum = Lower32of64(XXH3_64bits(buf + 4, kBlockSize - 4));
-//   if (checksum != checksum_from_disk) {
-//     return Status::Corruption("checksum unmatch for extent meta");
-//   }
-//   value_index_checksum_ = DecodeFixed32(buf + 4);
-//   base_alloc_block_off_ = DecodeFixed32(buf + 8);
-//   return Status::OK();
-// }
+std::shared_ptr<ExtentFile> ExtentMeta::GetExtentFile() {
+  return std::atomic_load(&file_);
+  // return Status::OK();
+  // {
+  //   std::shared_lock<std::shared_mutex> g(mu_);
+  //   if (file_ == nullptr) {
+  //     std::unique_ptr<ExtentFile> f;
+  //     Status s = ExtentFile::Open(fn_, std::string(db_name) + "/heap/", &f);
+  //     if (!s.ok()) {
+  //       return s;
+  //     }
+  //     file_.reset(f.release());
+  //   }
+  //   *file = file_;
+  // }
+  // return Status::OK();
+}
 
 Status ExtentFile::Open(ExtentFileName fn, std::string_view base_dir,
                         std::unique_ptr<ExtentFile>* file_ptr) {
@@ -49,6 +52,23 @@ Status ExtentFile::Open(ExtentFileName fn, std::string_view base_dir,
     return Status::IOError("failed to stat file " + path, strerror(errno));
   }
   *file_ptr = std::make_unique<ExtentFile>(fn, fd, st.st_size);
+  return Status::OK();
+}
+
+Status ExtentFile::Create(ExtentFileName fn, std::string_view base_dir,
+                          std::unique_ptr<ExtentFile>* file_ptr) {
+  std::string path = BuildPath(fn, base_dir).c_str();
+  int fd = open(path.c_str(), O_RDWR | O_DIRECT | O_CREAT | O_EXCL);
+  if (fd < 0) {
+    return Status::IOError("failed to create file " + path, strerror(errno));
+  }
+  size_t n = pwrite(fd, EMPTY_META_BUF_INST.b, kBlockSize, kExtentDataSize);
+  if (n < 0) {
+    return Status::IOError("failed to write init meta block " + path,
+                           strerror(errno));
+  }
+  *file_ptr =
+      std::make_unique<ExtentFile>(fn, fd, kExtentDataSize + kBlockSize);
   return Status::OK();
 }
 
@@ -70,20 +90,63 @@ Status ExtentFile::ReadValue(UringIoEngine* io_engine, ValueAddr addr,
   return Status::OK();
 }
 
-auto ExtentFile::ReadValueIndexAsync(UringIoEngine* io_engine, void* buf)
-    -> std::unique_ptr<UringCmdFuture> {
-  assert(is_aligned(reinterpret_cast<uint64_t>(buf), kBlockSize));
-  return io_engine->Read(UringIoOptions{}, fd_, buf, value_index_size(),
-                         kExtentValueIndexOffset);
-}
+// auto ExtentFile::ReadValueIndexAsync(UringIoEngine* io_engine, void* buf)
+//     -> std::unique_ptr<UringCmdFuture> {
+//   assert(is_aligned(reinterpret_cast<uint64_t>(buf), kBlockSize));
+//   return io_engine->Read(UringIoOptions{}, fd_, buf, value_index_size(),
+//                          kExtentValueIndexOffset);
+// }
 
 Status ExtentFile::ReadValueIndex(UringIoEngine* io_engine, void* buf) {
-  auto f = ReadValueIndexAsync(io_engine, buf);
+  assert(is_aligned(reinterpret_cast<uint64_t>(buf), kBlockSize));
+  auto f = io_engine->Read(UringIoOptions{}, fd_, buf, value_index_size(),
+                           kExtentValueIndexOffset);
+  // auto f = ReadValueIndexAsync(io_engine, buf);
   f->Wait();
   if (f->Result() < 0) {
     return Status::IOError("read extent index failed " + file_name_.ToString(),
                            strerror(-f->Result()));
   }
+  return Status::OK();
+}
+
+Status ExtentFile::UpdateAferAlloc(UringIoEngine* io_engine, ExtentMeta* meta,
+                                   uint32_t base_alloc_block_off,
+                                   const ExtentValueIndex& index_block,
+                                   void* buffer) {
+  // 1. encode
+  size_t n = kBlockSize + CalcValueIndexSize(index_block);
+  memset(buffer, 0, n);
+  char* cursor = static_cast<char*>(buffer) + kBlockSize;
+  size_t block_inuse = 0;
+  for (auto va : index_block) {
+    va.EncodeTo(cursor);
+    cursor += sizeof(ValueAddr);
+    block_inuse += va.b_cnt();
+  }
+  uint32_t value_index_checksum = Lower32of64(
+      XXH3_64bits(static_cast<char*>(buffer) + kBlockSize, n - kBlockSize));
+  cursor = static_cast<char*>(buffer);
+  EncodeFixed32(cursor + 4, base_alloc_block_off);
+  EncodeFixed32(cursor + 8, value_index_checksum);
+  EncodeFixed32(cursor + 12, block_inuse);
+  uint32_t meta_block_checksum =
+      Lower32of64(XXH3_64bits(static_cast<char*>(buffer) + 4, kBlockSize - 4));
+  EncodeFixed32(cursor, meta_block_checksum);
+  // 2. lock and write
+  auto meta_lock = meta->lock();
+  auto f = io_engine->Write(UringIoOptions{}, fd_, buffer, n, kExtentDataSize);
+  f->Wait();
+  if (f->Result() < 0) {
+    return Status::IOError(
+        "write meta and value index failed: " + file_name_.ToString(),
+        strerror(-f->Result()));
+  }
+  meta->base_alloc_block_off_ = base_alloc_block_off;
+  meta->value_index_checksum_ = value_index_checksum;
+  meta->inuse_block_num_ = block_inuse;
+  meta->meta_block_checksum_ = meta_block_checksum;
+  file_size_ = kExtentDataSize + n;
   return Status::OK();
 }
 

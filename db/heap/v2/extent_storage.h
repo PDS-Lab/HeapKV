@@ -5,16 +5,13 @@
 #include <cstdint>
 #include <memory>
 #include <mutex>
-#include <queue>
-#include <shared_mutex>
+#include <set>
 #include <unordered_set>
 
 #include "cache/cache_helpers.h"
 #include "cache/cache_key.h"
-#include "cache/typed_cache.h"
 #include "db/heap/utils.h"
 #include "db/heap/v2/extent.h"
-#include "db/heap/v2/heap_alloc_job.h"
 #include "db/heap/v2/heap_value_index.h"
 #include "memory/memory_allocator_impl.h"
 #include "rocksdb/cache.h"
@@ -71,6 +68,7 @@ class HeapValueGetContext {
  private:
   Status status_;
   HeapValueIndex hvi_;
+  std::shared_ptr<ExtentFile> file_;
   // will be set if cache hit
   CacheHandleGuard<HeapCacheData> cache_guard_;
   std::unique_ptr<UringCmdFuture> future_;
@@ -78,16 +76,21 @@ class HeapValueGetContext {
 
  public:
   HeapValueGetContext(Status s, HeapValueIndex hvi,
+                      std::shared_ptr<ExtentFile> file,
                       std::unique_ptr<UringCmdFuture> future,
                       std::unique_ptr<uint8_t[], decltype(std::free)*> buffer)
       : status_(s),
         hvi_(hvi),
+        file_(std::move(file)),
         future_(std::move(future)),
         buffer_(std::move(buffer)) {}
-  HeapValueGetContext(HeapValueIndex hvi,
+  HeapValueGetContext(HeapValueIndex hvi, std::shared_ptr<ExtentFile> file,
                       std::unique_ptr<UringCmdFuture> future,
                       std::unique_ptr<uint8_t[], decltype(std::free)*> buffer)
-      : hvi_(hvi), future_(std::move(future)), buffer_(std::move(buffer)) {}
+      : hvi_(hvi),
+        file_(std::move(file)),
+        future_(std::move(future)),
+        buffer_(std::move(buffer)) {}
   HeapValueGetContext(const HeapValueGetContext&) = delete;
   HeapValueGetContext& operator=(const HeapValueGetContext&) = delete;
   HeapValueGetContext(HeapValueGetContext&&) = default;
@@ -104,23 +107,22 @@ class HeapValueGetContext {
   }
 };
 
-struct ExtentMeta {
-  std::shared_mutex mu_;
-  ExtentFileName fn_;
-  uint32_t base_alloc_block_off_;
-  std::shared_ptr<ExtentFile> file_;
+using ExtentSpace = std::pair<uint32_t, uint32_t>;
+struct ExtentComp {
+  bool operator()(const ExtentSpace& lhs, const ExtentSpace& rhs) const {
+    if (lhs.second != rhs.second) {
+      return lhs.second > rhs.second;
+    }
+    return lhs.first < rhs.first;
+  }
 };
 
 class ExtentStorage {
  private:
   using ExtentList = std::array<ExtentMeta, 4096>;  // 32MiB * 4096 = 128GiB
-  using ExtentSpace = std::pair<uint32_t, uint32_t>;
-  struct ExtentComp {
-    bool operator()(const ExtentSpace& lhs, const ExtentSpace& rhs) const {
-      return lhs.second > rhs.second;
-    }
-  };
-  std::string db_name_;
+  using SortSet = std::set<ExtentSpace, ExtentComp>;
+  const std::string db_name_;
+  const double heap_extent_allocatable_threshold_ = 0.3;
   CacheKey hv_cache_key_;
   CacheKey vi_cache_key_;
   std::shared_ptr<Cache> heap_value_cache_;
@@ -129,9 +131,11 @@ class ExtentStorage {
 
   std::mutex mu_;  // for alloc and free
   uint32_t next_extent_file_number_;
-  std::unordered_set<ExtentFileName> lock_map_;
-  std::priority_queue<ExtentSpace, std::vector<ExtentSpace>, ExtentComp>
-      sort_extents_;
+  std::unordered_set<uint32_t> lock_map_;
+  std::unordered_set<uint32_t> free_space_map_;
+  // std::unordered_set<ExtentFileName> lock_map_;
+  // std::priority_queue<ExtentSpace, std::vector<ExtentSpace>, ExtentComp>
+  //     sort_extents_;
 
   // log::Writer manifest_;
 
@@ -142,6 +146,7 @@ class ExtentStorage {
   // CacheInterface file_cache_;  // store all opened extent
 
  public:
+  const std::string& db_name() const { return db_name_; }
   // fetch value
   auto GetHeapValueAsync(const ReadOptions& ro, UringIoEngine* io_engine,
                          const HeapValueIndex& hvi) -> HeapValueGetContext;
@@ -149,18 +154,24 @@ class ExtentStorage {
                     const HeapValueIndex& hvi, PinnableSlice* value) -> Status;
   auto WaitAsyncGet(const ReadOptions& ro, HeapValueGetContext ctx,
                     PinnableSlice* value) -> Status;
-  auto GetValueIndexBlock(UringIoEngine* io_engine, ExtentFile* file,
+  auto GetValueIndexBlock(UringIoEngine* io_engine, ExtentMeta* meta,
+                          std::shared_ptr<ExtentFile>* file,
                           PinnableSlice* value_index_block) -> Status;
   // alloc things
   auto GetExtentForAlloc(ExtentMeta** meta, uint16_t min_free_block) -> Status;
-  void FreeExtentAfterAlloc(ExtentFileName file_name, size_t file_size,
-                            uint32_t base_alloc_block_off);
+  void FreeExtentAfterAlloc(ExtentFileName file_name, uint32_t alloc_off);
+  void EvictValueIndexCache(ExtentFileName file_name);
   // garbage collect
+
  private:
   ExtentMeta* GetExtentMeta(uint32_t file_number);
-  Status GetExtentFile(uint32_t file_number, std::shared_ptr<ExtentFile>* file);
-  Status GetValueAddr(UringIoEngine* io_engine, ExtentFile* file,
-                      uint32_t value_index, ValueAddr* value_addr);
+  Status GetValueAddr(UringIoEngine* io_engine, ExtentMeta* meta,
+                      uint32_t value_index, std::shared_ptr<ExtentFile>* file,
+                      ValueAddr* value_addr);
+  bool ExtentCanAlloc(uint32_t alloc_off) const {
+    return double(kExtentBlockNum - alloc_off) / double(kExtentBlockNum) >
+           heap_extent_allocatable_threshold_;
+  }
 };
 
 }  // namespace HEAPKV_NS_V2
