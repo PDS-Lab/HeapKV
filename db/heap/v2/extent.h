@@ -1,5 +1,6 @@
 #pragma once
 
+#include <sys/types.h>
 #include <unistd.h>
 
 #include <array>
@@ -15,6 +16,7 @@
 #include "db/heap/io_engine.h"
 #include "db/heap/utils.h"
 #include "rocksdb/status.h"
+#include "util/coding_lean.h"
 
 namespace HEAPKV_NS_V2 {
 
@@ -47,13 +49,21 @@ struct ExtentFileName {
 };
 
 struct ValueAddr {
-  std::array<uint16_t, 2> raw_{0};
-  explicit ValueAddr(uint16_t next) : raw_({next, 0}) {}
-  ValueAddr(uint16_t off, uint16_t cnt) : raw_({off, cnt}) {}
-  uint16_t b_off() const { return raw_[0]; }
-  uint16_t b_cnt() const { return raw_[1]; }
-  uint16_t next_idle() const { return b_off(); }
-  bool has_value() const { return b_cnt() == 0; }
+  uint16_t b_off_;
+  uint16_t b_cnt_;
+  ValueAddr() : b_off_(0), b_cnt_(0) {}
+  ValueAddr(uint16_t off, uint16_t cnt) : b_off_(off), b_cnt_(cnt) {}
+  uint16_t b_off() const { return b_off_; }
+  uint16_t b_cnt() const { return b_cnt_; }
+  bool has_value() const { return b_cnt() != 0; }
+  char* EncodeTo(char* buf) {
+    EncodeFixed16(buf, b_off_);
+    EncodeFixed16(buf + 2, b_cnt_);
+    return buf + 4;
+  }
+  static ValueAddr DecodeFrom(const char* buf) {
+    return ValueAddr(DecodeFixed16(buf), DecodeFixed16(buf + 2));
+  }
 };
 
 // struct ExtentMeta {
@@ -77,6 +87,9 @@ class ExtentFile {
  public:
   ExtentFile(ExtentFileName file_name, int fd, size_t file_size)
       : file_name_(file_name), fd_(fd), file_size_(file_size) {}
+  ~ExtentFile() {
+    if (fd_ > 0) close(fd_);
+  }
   static std::string BuildPath(ExtentFileName file_name,
                                std::string_view base_dir);
   static void Remove(ExtentFileName fn, std::string_view base_dir) {
@@ -92,6 +105,9 @@ class ExtentFile {
   auto ReadValueIndexAsync(UringIoEngine* io_engine,
                            void* buf) -> std::unique_ptr<UringCmdFuture>;
   Status ReadValueIndex(UringIoEngine* io_engine, void* buf);
+
+  auto WriteValueAsync(UringIoEngine* io_engine, void* buf, off64_t offset,
+                       size_t size) -> std::unique_ptr<UringCmdFuture>;
 
   ExtentFileName file_name() const { return file_name_; }
   size_t value_index_size() const {

@@ -50,6 +50,9 @@ class BlobFileCache;
 class BlobSource;
 namespace heapkv {
 class CFHeapStorage;
+namespace v2 {
+class ExtentStorage;
+}
 }
 
 extern const double kIncSlowdownRatio;
@@ -383,6 +386,9 @@ class ColumnFamilyData {
   TableCache* table_cache() const { return table_cache_.get(); }
   BlobSource* blob_source() const { return blob_source_.get(); }
   heapkv::CFHeapStorage* heap_storage() const { return heap_storage_.get(); }
+  heapkv::v2::ExtentStorage* extent_storage() const {
+    return extent_storage_.get();
+  }
 
   // See documentation in compaction_picker.h
   // REQUIRES: DB mutex held
@@ -590,6 +596,7 @@ class ColumnFamilyData {
   std::unique_ptr<BlobFileCache> blob_file_cache_;
   std::unique_ptr<BlobSource> blob_source_;
   std::unique_ptr<heapkv::CFHeapStorage> heap_storage_;
+  std::unique_ptr<heapkv::v2::ExtentStorage> extent_storage_;
 
   std::unique_ptr<InternalStats> internal_stats_;
 

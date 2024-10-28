@@ -1,13 +1,16 @@
 #include "db/heap/v2/extent_storage.h"
 
-#include <atomic>
+#include <cstddef>
 #include <cstdint>
+#include <cstdlib>
 #include <memory>
-#include <mutex>
 #include <shared_mutex>
 
 #include "cache/cache_helpers.h"
+#include "db/heap/io_engine.h"
 #include "db/heap/v2/extent.h"
+#include "memory/memory_allocator_impl.h"
+#include "rocksdb/slice.h"
 #include "rocksdb/status.h"
 #include "util/hash.h"
 #include "util/xxhash.h"
@@ -30,43 +33,36 @@ ExtentMeta* ExtentStorage::GetExtentMeta(uint32_t file_number) {
 };
 
 Status ExtentStorage::GetExtentFile(uint32_t file_number,
-                                    CacheHandleGuard<ExtentFile>* file) {
-  struct ExtentFileCacheKey {
-    char magic[4]{'h', 'e', 'a', 'p'};
-    ExtentFileName fn;
-  };
-  ExtentFileCacheKey key{.fn = ExtentFileName{file_number, 0}};
-  TypedHandle* handle = file_cache_.Lookup(GetSliceForKey(&key));
-  if (handle) {
-    *file = file_cache_.Guard(handle);
-    return Status::OK();
-  }
-  Status s;
+                                    std::shared_ptr<ExtentFile>* file) {
   auto extent_meta = GetExtentMeta(file_number);
-  std::unique_ptr<ExtentFile> to_open;
   {
     std::shared_lock<std::shared_mutex> g(extent_meta->mu_);
     if (extent_meta->fn_.file_number_ != file_number) {
-      s = Status::Corruption("extent file not exist, maybe corrupted");
-    } else {
-      s = ExtentFile::Open(extent_meta->fn_, db_name_ + "/heap/", &to_open);
+      return Status::Corruption("extent file not exist, filenumber corrupted?");
     }
+    if (extent_meta->file_ == nullptr) {
+      std::unique_ptr<ExtentFile> f;
+      Status s = ExtentFile::Open(extent_meta->fn_, db_name_ + "/heap/", &f);
+      if (!s.ok()) {
+        return s;
+      }
+      extent_meta->file_.reset(f.release());
+    }
+    *file = extent_meta->file_;
   }
-  if (!s.ok()) {
-    return s;
-  }
-  s = file_cache_.Insert(GetSliceForKey(&key), to_open.get(), 1, &handle);
-  if (!s.ok()) {
-    return s;
-  }
-  *file = file_cache_.Guard(handle);
-  to_open.release();
   return Status::OK();
 }
 
-Status ExtentStorage::GetValueAddr(ExtentFile* file, uint32_t value_index,
+Status ExtentStorage::GetValueAddr(UringIoEngine* io_engine, ExtentFile* file,
+                                   uint32_t value_index,
                                    ValueAddr* value_addr) {
-  // TODO(wnj)
+  PinnableSlice index;
+  Status s = GetValueIndexBlock(io_engine, file, &index);
+  if (!s.ok()) {
+    return s;
+  }
+  *value_addr =
+      ValueAddr::DecodeFrom(index.data() + value_index * sizeof(ValueAddr));
   return Status::OK();
 }
 
@@ -75,7 +71,7 @@ auto ExtentStorage::GetHeapValueAsync(
     const HeapValueIndex& hvi) -> HeapValueGetContext {
   if (heap_value_cache_) {
     HeapValueCacheKey key(hv_cache_key_, hvi);
-    auto handle = heap_value_cache_->Lookup(key.AsSlice());
+    auto handle = heap_value_cache_->Lookup(GetSliceForKey(&key));
     if (handle) {
       // ctx will have ownership of the cache handle
       auto ctx = HeapValueGetContext(hvi, nullptr, {nullptr, std::free});
@@ -91,22 +87,22 @@ auto ExtentStorage::GetHeapValueAsync(
         Status::Incomplete("Cannot read heap value: no disk I/O allowed"), hvi,
         nullptr, {nullptr, std::free});
   }
-  CacheHandleGuard<ExtentFile> file;
+  std::shared_ptr<ExtentFile> file;
   Status s = GetExtentFile(hvi.extent_.file_number_, &file);
   if (!s.ok()) {
     return HeapValueGetContext(s, hvi, nullptr, {nullptr, std::free});
   }
   ValueAddr va = hvi.value_addr_;
-  if (hvi.extent_.file_epoch_ != file.GetValue()->file_name().file_epoch_) {
+  if (hvi.extent_.file_epoch_ != file->file_name().file_epoch_) {
     // gc happened, we need to fetch new value addr through value index
-    s = GetValueAddr(file.GetValue(), hvi.value_index_, &va);
+    s = GetValueAddr(io_engine, file.get(), hvi.value_index_, &va);
   }
   if (!s.ok()) {
     return HeapValueGetContext(s, hvi, nullptr, {nullptr, std::free});
   }
   void* ptr = std::aligned_alloc(kBlockSize, kBlockSize * va.b_cnt());
 
-  auto f = file.GetValue()->ReadValueAsync(io_engine, va, ptr);
+  auto f = file->ReadValueAsync(io_engine, va, ptr);
   return HeapValueGetContext(hvi, std::move(f),
                              std::unique_ptr<uint8_t[], decltype(std::free)*>(
                                  static_cast<uint8_t*>(ptr), std::free));
@@ -158,20 +154,20 @@ auto ExtentStorage::WaitAsyncGet(const ReadOptions& ro, HeapValueGetContext ctx,
         Slice(reinterpret_cast<const char*>(ctx.buffer_.get()),
               ctx.heap_value_index().value_size_),
         heap_value_cache_->memory_allocator());
-    auto cache_obj = std::make_unique<HeapValueCacheData>(
+    auto cache_obj = std::make_unique<HeapCacheData>(
         std::move(cache_ptr), ctx.heap_value_index().value_size_);
 
     Cache::Handle* cache_handle = nullptr;
     s = heap_value_cache_->Insert(
-        key.AsSlice(), cache_obj.get(),
-        BasicTypedCacheHelper<HeapValueCacheData,
+        GetSliceForKey(&key), cache_obj.get(),
+        BasicTypedCacheHelper<HeapCacheData,
                               CacheEntryRole::kHeapValue>::GetBasicHelper(),
         cache_obj->size_ + sizeof(*cache_obj), &cache_handle,
         Cache::Priority::BOTTOM);
     if (s.ok()) {
       auto _ = cache_obj.release();
-      auto guard = CacheHandleGuard<HeapValueCacheData>(heap_value_cache_.get(),
-                                                        cache_handle);
+      auto guard = CacheHandleGuard<HeapCacheData>(heap_value_cache_.get(),
+                                                   cache_handle);
       value->Reset();
       value->PinSlice(
           Slice(guard.GetValue()->allocation_.get(), guard.GetValue()->size_),
@@ -188,6 +184,67 @@ auto ExtentStorage::WaitAsyncGet(const ReadOptions& ro, HeapValueGetContext ctx,
             ctx.heap_value_index().value_size_),
       [](void* arg1, void*) { free(arg1); }, buffer, nullptr);
   return s;
+}
+
+auto ExtentStorage::GetValueIndexBlock(
+    UringIoEngine* io_engine, ExtentFile* file,
+    PinnableSlice* value_index_block) -> Status {
+  ValueIndexCacheKey key(vi_cache_key_, file->file_name());
+  if (heap_value_cache_) {
+    auto handle = heap_value_cache_->Lookup(GetSliceForKey(&key));
+    if (handle != nullptr) {
+      auto cache_guard =
+          CacheHandleGuard<HeapCacheData>(heap_value_cache_.get(), handle);
+      value_index_block->Reset();
+      value_index_block->PinSlice(
+          Slice(cache_guard.GetValue()->allocation_.get(),
+                cache_guard.GetValue()->size_),
+          nullptr);
+      cache_guard.TransferTo(value_index_block);
+      return Status::OK();
+    }
+  }
+  size_t n = file->value_index_size();
+  void* ptr = std::aligned_alloc(kBlockSize, n);
+  if (ptr == nullptr) {
+    return Status::MemoryLimit("failed to alloc value index read buffer");
+  }
+  auto g = std::unique_ptr<uint8_t[], decltype(std::free)*>(
+      static_cast<uint8_t*>(ptr), std::free);
+  Status s = file->ReadValueIndex(io_engine, ptr);
+  if (!s.ok()) {
+    return s;
+  }
+  if (heap_value_cache_) {
+    auto cap = AllocateAndCopyBlock(
+        Slice(static_cast<char*>(ptr), n),
+        heap_value_cache_ ? heap_value_cache_->memory_allocator() : nullptr);
+    auto cache_obj = std::make_unique<HeapCacheData>(std::move(cap), n);
+    Cache::Handle* cache_handle = nullptr;
+    s = heap_value_cache_->Insert(
+        GetSliceForKey(&key), cache_obj.get(),
+        BasicTypedCacheHelper<HeapCacheData,
+                              CacheEntryRole::kHeapValue>::GetBasicHelper(),
+        n + sizeof(*cache_obj), &cache_handle, Cache::Priority::HIGH);
+    if (!s.ok()) {
+      return s;
+    }
+    cache_obj.release();
+    auto cache_guard =
+        CacheHandleGuard<HeapCacheData>(heap_value_cache_.get(), cache_handle);
+    value_index_block->Reset();
+    value_index_block->PinSlice(Slice(cache_guard.GetValue()->allocation_.get(),
+                                      cache_guard.GetValue()->size_),
+                                nullptr);
+    cache_guard.TransferTo(value_index_block);
+  } else {
+    g.release();
+    value_index_block->Reset();
+    value_index_block->PinSlice(
+        Slice(reinterpret_cast<const char*>(ptr), n),
+        [](void* arg1, void*) { free(arg1); }, ptr, nullptr);
+  }
+  return Status::OK();
 }
 
 }  // namespace HEAPKV_NS_V2
