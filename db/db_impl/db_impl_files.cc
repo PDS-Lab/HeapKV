@@ -13,7 +13,6 @@
 
 #include "db/db_impl/db_impl.h"
 #include "db/event_helpers.h"
-#include "db/heap/heap_storage.h"
 #include "db/memtable_list.h"
 #include "file/file_util.h"
 #include "file/filename.h"
@@ -404,19 +403,19 @@ void DBImpl::DeleteObsoleteFileImpl(int job_id, const std::string& fname,
       if (cfd->IsDropped()) {
         continue;
       }
-      if (cfd->heap_storage()) {
-        auto job = cfd->heap_storage()->NotifyFileDeletion(number);
-        if (job != nullptr) {
-          auto arg = new heapkv::CFHeapStorage::HeapGCArg{
-              .db_ = this,
-              .shutting_down_ = &shutting_down_,
-              .cfd_ = cfd,
-              .storage_ = cfd->heap_storage(),
-              .job_ = std::move(job),
-              .force_gc_ = false};
-          env_->Schedule(&BGWorkHeapGCJob, arg);
-          bg_heap_gc_scheduled_++;
-        }
+      if (cfd->extent_storage()) {
+        // auto job = cfd->heap_storage()->NotifyFileDeletion(number);
+        // if (job != nullptr) {
+        //   auto arg = new heapkv::CFHeapStorage::HeapGCArg{
+        //       .db_ = this,
+        //       .shutting_down_ = &shutting_down_,
+        //       .cfd_ = cfd,
+        //       .storage_ = cfd->heap_storage(),
+        //       .job_ = std::move(job),
+        //       .force_gc_ = false};
+        //   env_->Schedule(&BGWorkHeapGCJob, arg);
+        //   bg_heap_gc_scheduled_++;
+        // }
       }
     }
     mutex_.Unlock();

@@ -13,7 +13,7 @@
 
 #include "db/compaction/compaction.h"
 #include "db/compaction/compaction_iteration_stats.h"
-#include "db/heap/heap_alloc_job.h"
+#include "db/heap/v2/heap_alloc_job.h"
 #include "db/merge_helper.h"
 #include "db/pinned_iterators_manager.h"
 #include "db/range_del_aggregator.h"
@@ -208,8 +208,9 @@ class CompactionIterator {
       SequenceNumber job_snapshot, const SnapshotChecker* snapshot_checker,
       Env* env, bool report_detailed_time, bool expect_valid_internal_key,
       CompactionRangeDelAggregator* range_del_agg,
-      BlobFileBuilder* blob_file_builder, heapkv::HeapAllocJob* heap_alloc_job,
-      bool allow_data_in_errors, bool enforce_single_del_contracts,
+      BlobFileBuilder* blob_file_builder,
+      heapkv::v2::HeapAllocJob* heap_alloc_job, bool allow_data_in_errors,
+      bool enforce_single_del_contracts,
       const std::atomic<bool>& manual_compaction_canceled,
       bool must_count_input_entries, const Compaction* compaction = nullptr,
       const CompactionFilter* compaction_filter = nullptr,
@@ -227,8 +228,9 @@ class CompactionIterator {
       SequenceNumber job_snapshot, const SnapshotChecker* snapshot_checker,
       Env* env, bool report_detailed_time, bool expect_valid_internal_key,
       CompactionRangeDelAggregator* range_del_agg,
-      BlobFileBuilder* blob_file_builder, heapkv::HeapAllocJob* heap_alloc_job,
-      bool allow_data_in_errors, bool enforce_single_del_contracts,
+      BlobFileBuilder* blob_file_builder,
+      heapkv::v2::HeapAllocJob* heap_alloc_job, bool allow_data_in_errors,
+      bool enforce_single_del_contracts,
       const std::atomic<bool>& manual_compaction_canceled,
       std::unique_ptr<CompactionProxy> compaction,
       bool must_count_input_entries,
@@ -372,7 +374,7 @@ class CompactionIterator {
   const bool expect_valid_internal_key_;
   CompactionRangeDelAggregator* range_del_agg_;
   BlobFileBuilder* blob_file_builder_;
-  heapkv::HeapAllocJob* heap_alloc_job_;
+  heapkv::v2::HeapAllocJob* heap_alloc_job_;
   std::unique_ptr<CompactionProxy> compaction_;
   const CompactionFilter* compaction_filter_;
   const std::atomic<bool>* shutting_down_;

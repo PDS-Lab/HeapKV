@@ -26,9 +26,9 @@
 #include "db/compaction/compaction.h"
 #include "db/compaction/file_pri.h"
 #include "db/dbformat.h"
-#include "db/heap/heap_storage.h"
-#include "db/heap/heap_value_index.h"
 #include "db/heap/io_engine.h"
+#include "db/heap/v2/extent_storage.h"
+#include "db/heap/v2/heap_value_index.h"
 #include "db/internal_stats.h"
 #include "db/log_reader.h"
 #include "db/log_writer.h"
@@ -2289,13 +2289,10 @@ Status Version::GetHeapValue(const ReadOptions& read_options,
                              const Slice& heap_value_index_slice,
                              PinnableSlice* value) const {
   Status s;
-  heapkv::HeapValueIndex heap_value_index;
-  s = heap_value_index.DecodeFrom(heap_value_index_slice);
-  if (!s.ok()) {
-    return s;
-  }
+  auto heap_value_index =
+      heapkv::v2::HeapValueIndex::DecodeFrom(heap_value_index_slice);
   value->Reset();
-  s = cfd_->heap_storage()->GetHeapValue(
+  s = cfd_->extent_storage()->GetHeapValue(
       read_options, heapkv::GetThreadLocalIoEngine(), heap_value_index, value);
   return s;
 }
@@ -2426,7 +2423,7 @@ void Version::Get(const ReadOptions& read_options, const LookupKey& k,
       max_covering_tombstone_seq, clock_, seq,
       merge_operator_ ? pinned_iters_mgr : nullptr, callback, is_blob_to_use,
       &is_heap_value_index, tracing_get_id, &blob_fetcher,
-      cfd_->heap_storage());
+      cfd_->extent_storage());
 
   // Pin blocks that we read to hold merge operands
   if (merge_operator_) {
@@ -5181,10 +5178,10 @@ Status VersionSet::Close(FSDirectory* db_dir, InstrumentedMutex* mu) {
   }
 
   for (const auto cf : *column_family_set_) {
-    if (cf->heap_storage()) {
-      cf->heap_storage()->MarkStop();
-      cf->heap_storage()->WaitAllJobDone();
-    }
+    // if (cf->heap_storage()) {
+    //   cf->heap_storage()->MarkStop();
+    //   cf->heap_storage()->WaitAllJobDone();
+    // }
   }
 
   std::string manifest_file_name =

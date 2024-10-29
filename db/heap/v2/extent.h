@@ -108,8 +108,7 @@ class ExtentFile {
   static void Remove(ExtentFileName fn, std::string_view base_dir) {
     unlink(BuildPath(fn, base_dir).c_str());
   }
-  static auto OpenAsync(UringIoEngine* io_engine, ExtentFileName fn,
-                        std::string_view base_dir)
+  static auto OpenAsync(UringIoEngine* io_engine, const std::string& path)
       -> std::unique_ptr<UringCmdFuture>;
   static Status Open(ExtentFileName fn, std::string_view base_dir,
                      std::unique_ptr<ExtentFile>* file_ptr);

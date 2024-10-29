@@ -20,7 +20,7 @@ namespace HEAPKV_NS_V2 {
 
 Status ExtentFile::Open(ExtentFileName fn, std::string_view base_dir,
                         std::unique_ptr<ExtentFile>* file_ptr) {
-  std::string path = BuildPath(fn, base_dir).c_str();
+  std::string path = BuildPath(fn, base_dir);
   int fd = open(path.c_str(), O_RDWR | O_DIRECT);
   if (fd < 0) {
     return Status::IOError("failed to open file " + path, strerror(errno));
@@ -34,14 +34,21 @@ Status ExtentFile::Open(ExtentFileName fn, std::string_view base_dir,
   return Status::OK();
 }
 
+auto ExtentFile::OpenAsync(UringIoEngine* io_engine, const std::string& path)
+    -> std::unique_ptr<UringCmdFuture> {
+  // std::string path = BuildPath(fn, base_dir);
+  return io_engine->OpenAt(UringIoOptions{}, AT_FDCWD, path.c_str(),
+                           O_RDWR | O_DIRECT, 0644);
+}
+
 Status ExtentFile::Create(ExtentFileName fn, std::string_view base_dir,
                           std::unique_ptr<ExtentFile>* file_ptr) {
-  std::string path = BuildPath(fn, base_dir).c_str();
-  int fd = open(path.c_str(), O_RDWR | O_DIRECT | O_CREAT | O_EXCL);
+  std::string path = BuildPath(fn, base_dir);
+  int fd = open(path.c_str(), O_RDWR | O_DIRECT | O_CREAT | O_EXCL, 0644);
   if (fd < 0) {
     return Status::IOError("failed to create file " + path, strerror(errno));
   }
-  size_t n = pwrite(fd, EMPTY_META_BUF_INST.b, kBlockSize, kExtentDataSize);
+  ssize_t n = pwrite(fd, EMPTY_META_BUF_INST.b, kBlockSize, kExtentDataSize);
   if (n < 0) {
     return Status::IOError("failed to write init meta block " + path,
                            strerror(errno));
@@ -67,6 +74,20 @@ Status ExtentFile::ReadValue(UringIoEngine* io_engine, ValueAddr addr,
                            strerror(-f->Result()));
   }
   return Status::OK();
+}
+
+auto ExtentFile::ReadMetaAsync(UringIoEngine* io_engine,
+                               void* buf) -> std::unique_ptr<UringCmdFuture> {
+  assert(is_aligned(reinterpret_cast<uint64_t>(buf), kBlockSize));
+  return io_engine->Read(UringIoOptions{}, fd_, buf, kBlockSize,
+                         kExtentDataSize);
+}
+
+auto ExtentFile::WriteValueAsync(UringIoEngine* io_engine, void* buf,
+                                 off64_t offset, size_t size)
+    -> std::unique_ptr<UringCmdFuture> {
+  assert(is_aligned(reinterpret_cast<uint64_t>(buf), kBlockSize));
+  return io_engine->Write(UringIoOptions{}, fd_, buf, size, offset);
 }
 
 // auto ExtentFile::ReadValueIndexAsync(UringIoEngine* io_engine, void* buf)

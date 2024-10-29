@@ -6,8 +6,8 @@
 #include <vector>
 
 #include "db/dbformat.h"
-#include "db/heap/heap_storage.h"
 #include "db/heap/io_engine.h"
+#include "db/heap/v2/extent_storage.h"
 #include "rocksdb/options.h"
 #include "rocksdb/rocksdb_namespace.h"
 #include "rocksdb/slice.h"
@@ -22,14 +22,14 @@ namespace heapkv {
 struct PrefetchUnit {
   Slice user_key_;
   Slice value_;
-  std::unique_ptr<HeapValueGetContext> async_ctx_;
+  std::unique_ptr<v2::HeapValueGetContext> async_ctx_;
 };
 
 class PrefetchGroup {
   const uint32_t BUFFER_SIZE = 8192;
 
  private:
-  CFHeapStorage *heap_storage_;
+  v2::ExtentStorage *extent_storage_;
   char *current_buffer_{nullptr};
   uint32_t buffer_off_{0};
   uint32_t iter_pos_{0};
@@ -41,7 +41,8 @@ class PrefetchGroup {
   std::vector<PrefetchUnit> prefetch_list_;
 
  public:
-  PrefetchGroup(CFHeapStorage *heap_storage) : heap_storage_(heap_storage) {}
+  PrefetchGroup(v2::ExtentStorage *extent_storage)
+      : extent_storage_(extent_storage) {}
   ~PrefetchGroup();
   Status DoPrefetch(const ReadOptions &ro, UringIoEngine *io_engine,
                     DBIter *iter, size_t batch);
@@ -76,9 +77,9 @@ class HeapIterPrefetcher {
   uint32_t current_batch_{2};
 
  public:
-  HeapIterPrefetcher(const ReadOptions &ro, CFHeapStorage *heap_storage,
+  HeapIterPrefetcher(const ReadOptions &ro, v2::ExtentStorage *extent_storage,
                      DBIter *iter)
-      : ro_(ro), iter_(iter), pg1_(heap_storage), pg2_(heap_storage) {}
+      : ro_(ro), iter_(iter), pg1_(extent_storage), pg2_(extent_storage) {}
   Status StartPrefetch() {
     pg1_.Reset();
     pg2_.Reset();

@@ -13,7 +13,6 @@
 #include "db/blob/blob_index.h"
 #include "db/blob/prefetch_buffer_collection.h"
 #include "db/dbformat.h"
-#include "db/heap/heap_value_index.h"
 #include "db/snapshot_checker.h"
 #include "db/wide/wide_column_serialization.h"
 #include "db/wide/wide_columns_helper.h"
@@ -31,8 +30,9 @@ CompactionIterator::CompactionIterator(
     SequenceNumber job_snapshot, const SnapshotChecker* snapshot_checker,
     Env* env, bool report_detailed_time, bool expect_valid_internal_key,
     CompactionRangeDelAggregator* range_del_agg,
-    BlobFileBuilder* blob_file_builder, heapkv::HeapAllocJob* heap_alloc_job,
-    bool allow_data_in_errors, bool enforce_single_del_contracts,
+    BlobFileBuilder* blob_file_builder,
+    heapkv::v2::HeapAllocJob* heap_alloc_job, bool allow_data_in_errors,
+    bool enforce_single_del_contracts,
     const std::atomic<bool>& manual_compaction_canceled,
     bool must_count_input_entries, const Compaction* compaction,
     const CompactionFilter* compaction_filter,
@@ -60,8 +60,9 @@ CompactionIterator::CompactionIterator(
     SequenceNumber job_snapshot, const SnapshotChecker* snapshot_checker,
     Env* env, bool report_detailed_time, bool expect_valid_internal_key,
     CompactionRangeDelAggregator* range_del_agg,
-    BlobFileBuilder* blob_file_builder, heapkv::HeapAllocJob* heap_alloc_job,
-    bool allow_data_in_errors, bool enforce_single_del_contracts,
+    BlobFileBuilder* blob_file_builder,
+    heapkv::v2::HeapAllocJob* heap_alloc_job, bool allow_data_in_errors,
+    bool enforce_single_del_contracts,
     const std::atomic<bool>& manual_compaction_canceled,
     std::unique_ptr<CompactionProxy> compaction, bool must_count_input_entries,
     const CompactionFilter* compaction_filter,
@@ -1110,7 +1111,7 @@ void CompactionIterator::ExtractLargeValueIfNeeded() {
     current_key_.UpdateInternalKey(ikey_.sequence, ikey_.type);
   } else if (heap_alloc_job_ &&
              value().size() >= heap_alloc_job_->min_heap_value_size()) {
-    heapkv::HeapValueIndex hvi;
+    heapkv::v2::HeapValueIndex hvi;
     const Status s = heap_alloc_job_->Add(key(), value(), &hvi);
     if (!s.ok()) {
       status_ = s;

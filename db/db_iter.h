@@ -15,7 +15,6 @@
 #include "db/db_impl/db_impl.h"
 #include "db/dbformat.h"
 #include "db/heap/heap_iter_prefetch.h"
-#include "db/heap/heap_storage.h"
 #include "db/heap/io_engine.h"
 #include "options/cf_options.h"
 #include "rocksdb/db.h"
@@ -444,7 +443,7 @@ class HeapPrefetchDBIter final : public Iterator {
   struct PrefetchCtx {
     std::string key_;
     std::string value_;
-    heapkv::HeapValueGetContext get_ctx_;
+    heapkv::v2::HeapValueGetContext get_ctx_;
   };
 
  private:
@@ -472,7 +471,7 @@ class HeapPrefetchDBIter final : public Iterator {
         enable_heap_prefetch(ioptions.enable_heapkv &&
                              read_options.enable_heap_prefetch),
         io_engine_(heapkv::GetThreadLocalIoEngine()),
-        prefetcher_(read_options, cfd->heap_storage(), &db_iter_) {}
+        prefetcher_(read_options, cfd->extent_storage(), &db_iter_) {}
   // No copying allowed
   HeapPrefetchDBIter(const HeapPrefetchDBIter&) = delete;
   void operator=(const HeapPrefetchDBIter&) = delete;

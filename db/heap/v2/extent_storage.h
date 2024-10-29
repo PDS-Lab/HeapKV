@@ -173,8 +173,7 @@ class ExtentStorage {
                       uint32_t value_index, std::shared_ptr<ExtentFile>* file,
                       ValueAddr* value_addr);
   bool ExtentCanAlloc(uint32_t alloc_off) const {
-    return double(kExtentBlockNum - alloc_off) / double(kExtentBlockNum) >
-           cfd_->ioptions()->heap_extent_allocatable_threshold;
+    return kBlockSize * (kExtentBlockNum - alloc_off) >= (1 << 20);
   }
 };
 

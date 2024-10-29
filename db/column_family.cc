@@ -23,7 +23,6 @@
 #include "db/compaction/compaction_picker_level.h"
 #include "db/compaction/compaction_picker_universal.h"
 #include "db/db_impl/db_impl.h"
-#include "db/heap/heap_storage.h"
 #include "db/internal_stats.h"
 #include "db/job_context.h"
 #include "db/range_del_aggregator.h"
@@ -623,13 +622,15 @@ ColumnFamilyData::ColumnFamilyData(
     }
 
     if (ioptions_.enable_heapkv) {
-      Status s = heapkv::CFHeapStorage::OpenOrCreate(
-          column_family_set->db_name_, this, &heap_storage_);
+      Status s = heapkv::v2::ExtentStorage::OpenStorage(
+          column_family_set->db_name_, this, &extent_storage_);
+      // Status s = heapkv::CFHeapStorage::OpenOrCreate(
+      //     column_family_set->db_name_, this, &heap_storage_);
       if (!s.ok()) {
         ROCKS_LOG_ERROR(ioptions_.logger,
                         "Failed to open heap storage for column family %s: %s",
                         name.c_str(), s.ToString().c_str());
-        heap_storage_.reset();
+        extent_storage_.reset();
       }
     }
   }

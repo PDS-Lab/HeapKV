@@ -28,7 +28,6 @@
 #include "db/error_handler.h"
 #include "db/event_helpers.h"
 #include "db/heap/heap_garbage_collector.h"
-#include "db/heap/heap_storage.h"
 #include "db/history_trimming_iterator.h"
 #include "db/log_writer.h"
 #include "db/merge_helper.h"
@@ -1226,10 +1225,12 @@ void CompactionJob::ProcessKeyValueCompaction(SubcompactionState* sub_compact) {
   std::unique_ptr<InternalIterator> heap_value_checker;
 
   if (sub_compact->compaction->immutable_options()->enable_heapkv) {
-    auto collector = sub_compact->Current().CreateHeapValueGarbageCollector();
-    heap_value_checker = std::make_unique<heapkv::HeapValueGarbageCheckIterator>(
-        input, collector);
-    input = heap_value_checker.get();
+    // auto collector =
+    // sub_compact->Current().CreateHeapValueGarbageCollector();
+    // heap_value_checker =
+    // std::make_unique<heapkv::HeapValueGarbageCheckIterator>(
+    //     input, collector);
+    // input = heap_value_checker.get();
   }
 
   std::unique_ptr<InternalIterator> trim_history_iter;
@@ -1790,20 +1791,20 @@ Status CompactionJob::InstallCompactionResults(
       }
     }
 
-    if (sub_compact.Current().GetHeapValueGarbageCollector()) {
-      auto res = sub_compact.Current()
-                     .GetHeapValueGarbageCollector()
-                     ->FinalizeDropResult();
-      heap_total_garbage.insert(heap_total_garbage.end(), res.begin(),
-                                res.end());
-    }
+    // if (sub_compact.Current().GetHeapValueGarbageCollector()) {
+    //   auto res = sub_compact.Current()
+    //                  .GetHeapValueGarbageCollector()
+    //                  ->FinalizeDropResult();
+    //   heap_total_garbage.insert(heap_total_garbage.end(), res.begin(),
+    //                             res.end());
+    // }
   }
-  if (!heap_total_garbage.empty()) {
-    heapkv::HeapGarbageCollector::CompactDropResult(heap_total_garbage);
-    compact_->compaction->column_family_data()
-        ->heap_storage()
-        ->CommitGarbageBlocks(*compact_->compaction, heap_total_garbage);
-  }
+  // if (!heap_total_garbage.empty()) {
+  //   heapkv::HeapGarbageCollector::CompactDropResult(heap_total_garbage);
+  //   compact_->compaction->column_family_data()
+  //       ->heap_storage()
+  //       ->CommitGarbageBlocks(*compact_->compaction, heap_total_garbage);
+  // }
 
   for (const auto& pair : blob_total_garbage) {
     const uint64_t blob_file_number = pair.first;

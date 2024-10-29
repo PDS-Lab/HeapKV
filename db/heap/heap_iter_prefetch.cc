@@ -7,8 +7,8 @@
 #include <memory>
 
 #include "db/db_iter.h"
-#include "db/heap/heap_value_index.h"
 #include "db/heap/io_engine.h"
+#include "db/heap/v2/heap_value_index.h"
 #include "rocksdb/options.h"
 #include "rocksdb/slice.h"
 #include "rocksdb/status.h"
@@ -79,12 +79,8 @@ Status PrefetchGroup::AppendUnit(const ReadOptions &ro,
     pu.user_key_ = Slice(ptr, user_key.size());
     pu.value_ = Slice(ptr + user_key.size(), value.size());
     if (is_heap_value) {
-      HeapValueIndex hvi;
-      s = hvi.DecodeFrom(value);
-      if (!s.ok()) {
-        return s;
-      }
-      auto getCtx = heap_storage_->GetHeapValueAsync(ro, io_engine, hvi);
+      auto hvi = v2::HeapValueIndex::DecodeFrom(value);
+      auto getCtx = extent_storage_->GetHeapValueAsync(ro, io_engine, hvi);
       pu.async_ctx_ = std::make_unique<decltype(getCtx)>(std::move(getCtx));
     }
     prefetch_list_.push_back(std::move(pu));
@@ -128,7 +124,7 @@ Status PrefetchGroup::Next(const ReadOptions &ro) {
     return s;
   }
   if (prefetch_list_[iter_pos_].async_ctx_ != nullptr) {
-    s = heap_storage_->WaitAsyncGet(
+    s = extent_storage_->WaitAsyncGet(
         ro, std::move(*prefetch_list_[iter_pos_].async_ctx_), &heap_value_);
   }
   iter_pos_++;

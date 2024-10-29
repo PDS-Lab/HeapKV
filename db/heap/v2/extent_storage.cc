@@ -42,9 +42,10 @@ Status ExtentStorage::OpenStorage(std::string_view db_name,
                                   ColumnFamilyData* cfd,
                                   std::unique_ptr<ExtentStorage>* storage) {
   auto io_engine = GetThreadLocalIoEngine();
-  const std::string root_dir{std::format("{}/heap", db_name)};
+  const std::string root_dir{std::format("{}/heapkv", db_name)};
   struct ExtentOpenCtx {
     ExtentFileName file_name;
+    std::string path;
     size_t file_size;
     std::unique_ptr<UringCmdFuture> f;
     std::unique_ptr<ExtentFile> file;
@@ -59,10 +60,12 @@ Status ExtentStorage::OpenStorage(std::string_view db_name,
       ROCKS_LOG_DEBUG(cfd->ioptions()->logger, "open file %s", fn.c_str());
       async_handle.emplace_back(ExtentOpenCtx{
           .file_name = file_name,
+          .path = dir_entry.path().string(),
           .file_size = dir_entry.file_size(),
-          .f = ExtentFile::OpenAsync(io_engine, file_name, root_dir),
           .meta = es->GetExtentMeta(file_name.file_number_),
       });
+      async_handle.back().f =
+          ExtentFile::OpenAsync(io_engine, async_handle.back().path);
     }
   }
 
@@ -111,6 +114,12 @@ Status ExtentStorage::OpenStorage(std::string_view db_name,
       return s;
     }
   }
+  es->next_extent_file_number_ = async_handle.size();
+  for (size_t i = 0; i < async_handle.size(); i++) {
+    es->FreeExtentAfterAlloc(async_handle[i].file_name,
+                             async_handle[i].meta->base_alloc_block_off_);
+  }
+  *storage = std::move(es);
   return Status::OK();
 }
 
@@ -347,7 +356,7 @@ auto ExtentStorage::GetExtentForAlloc(ExtentMeta** meta,
   }
   std::unique_ptr<ExtentFile> file;
   Status s = ExtentFile::Create(ExtentFileName(file_number, 0),
-                                db_name_ + "/heap/", &file);
+                                db_name_ + "/heapkv/", &file);
   if (!s.ok()) {
     return s;
   }

@@ -8,6 +8,7 @@
 #include "db/heap/v2/extent.h"
 #include "rocksdb/compression_type.h"
 #include "rocksdb/types.h"
+#include "util/coding.h"
 #include "util/coding_lean.h"
 
 namespace HEAPKV_NS_V2 {
@@ -21,6 +22,7 @@ struct HeapValueIndex {
   uint32_t value_size_{0};
   uint32_t value_checksum_{0};
   uint64_t packed_seqnum_compression_type_{0};
+  HeapValueIndex() = default;
   HeapValueIndex(ExtentFileName extent, ValueAddr value_addr,
                  uint32_t value_index, uint32_t value_size,
                  uint32_t value_checksum,
@@ -42,6 +44,7 @@ struct HeapValueIndex {
   }
   uint64_t seq_num() const { return packed_seqnum_compression_type_ >> 8; }
   void EncodeTo(char* dst);
+  void EncodeTo(std::string* dst);
   static HeapValueIndex DecodeFrom(const Slice& raw);
 };
 
@@ -63,6 +66,17 @@ inline void HeapValueIndex::EncodeTo(char* dst) {
   EncodeFixed32(dst, value_checksum_);
   dst += 4;
   EncodeFixed64(dst, packed_seqnum_compression_type_);
+}
+
+inline void HeapValueIndex::EncodeTo(std::string* dst) {
+  PutFixed32(dst, extent_.file_epoch_);
+  PutFixed32(dst, extent_.file_number_);
+  PutFixed16(dst, value_addr_.b_off());
+  PutFixed16(dst, value_addr_.b_cnt());
+  PutFixed32(dst, value_index_);
+  PutFixed32(dst, value_size_);
+  PutFixed32(dst, value_checksum_);
+  PutFixed64(dst, packed_seqnum_compression_type_);
 }
 
 inline HeapValueIndex HeapValueIndex::DecodeFrom(const Slice& raw) {

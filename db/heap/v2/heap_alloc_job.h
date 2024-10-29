@@ -60,6 +60,9 @@ class HeapAllocJob {
   Status InitJob();
   Status Add(const Slice& key, const Slice& value, HeapValueIndex* hvi);
   Status Finish(bool commit);
+  size_t min_heap_value_size() const {
+    return cfd_->ioptions()->min_heap_value_size;
+  }
 
  private:
   char* GetBuffer() { return commit_count_ & 1 ? buffer2_ : buffer1_; }

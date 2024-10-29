@@ -36,7 +36,6 @@
 #include "db/external_sst_file_ingestion_job.h"
 #include "db/flush_job.h"
 #include "db/forward_iterator.h"
-#include "db/heap/heap_storage.h"
 #include "db/import_column_family_job.h"
 #include "db/job_context.h"
 #include "db/log_reader.h"
@@ -566,22 +565,22 @@ Status DBImpl::CloseHelper() {
   // gc all
   // TODO(wnj): we can delete this after we can recover from manifest
   {
-    for (auto cfd : *versions_->GetColumnFamilySet()) {
-      if (cfd->heap_storage() != nullptr) {
-        auto arg = new heapkv::CFHeapStorage::HeapGCArg{
-            .db_ = this,
-            .shutting_down_ = &shutting_down_,
-            .cfd_ = cfd,
-            .storage_ = cfd->heap_storage(),
-            .job_ = nullptr,
-            .force_gc_ = true};
-        env_->Schedule(&BGWorkHeapGCJob, arg);
-        bg_heap_gc_scheduled_++;
-      }
-    }
-    while (bg_heap_gc_scheduled_ > 0) {
-      bg_cv_.Wait();
-    }
+    // for (auto cfd : *versions_->GetColumnFamilySet()) {
+    //   if (cfd->heap_storage() != nullptr) {
+    //     auto arg = new heapkv::CFHeapStorage::HeapGCArg{
+    //         .db_ = this,
+    //         .shutting_down_ = &shutting_down_,
+    //         .cfd_ = cfd,
+    //         .storage_ = cfd->heap_storage(),
+    //         .job_ = nullptr,
+    //         .force_gc_ = true};
+    //     env_->Schedule(&BGWorkHeapGCJob, arg);
+    //     bg_heap_gc_scheduled_++;
+    //   }
+    // }
+    // while (bg_heap_gc_scheduled_ > 0) {
+    //   bg_cv_.Wait();
+    // }
   }
 
   TEST_SYNC_POINT_CALLBACK("DBImpl::CloseHelper:PendingPurgeFinished",
