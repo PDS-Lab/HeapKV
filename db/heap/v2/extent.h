@@ -7,6 +7,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
+#include <format>
 #include <memory>
 #include <mutex>
 #include <shared_mutex>
@@ -97,10 +98,19 @@ class ExtentFile {
     if (fd_ > 0) close(fd_);
   }
   static std::string BuildPath(ExtentFileName file_name,
-                               std::string_view base_dir);
+                               std::string_view base_dir) {
+    if (base_dir.ends_with('/')) {
+      return std::format("{}{}", base_dir, file_name.ToString());
+    } else {
+      return std::format("{}/{}", base_dir, file_name.ToString());
+    }
+  }
   static void Remove(ExtentFileName fn, std::string_view base_dir) {
     unlink(BuildPath(fn, base_dir).c_str());
   }
+  static auto OpenAsync(UringIoEngine* io_engine, ExtentFileName fn,
+                        std::string_view base_dir)
+      -> std::unique_ptr<UringCmdFuture>;
   static Status Open(ExtentFileName fn, std::string_view base_dir,
                      std::unique_ptr<ExtentFile>* file_ptr);
   static Status Create(ExtentFileName fn, std::string_view base_dir,
@@ -109,6 +119,9 @@ class ExtentFile {
   auto ReadValueAsync(UringIoEngine* io_engine, ValueAddr addr,
                       void* buf) -> std::unique_ptr<UringCmdFuture>;
   Status ReadValue(UringIoEngine* io_engine, ValueAddr addr, void* buf);
+
+  auto ReadMetaAsync(UringIoEngine* io_engine,
+                     void* buf) -> std::unique_ptr<UringCmdFuture>;
 
   auto WriteValueAsync(UringIoEngine* io_engine, void* buf, off64_t offset,
                        size_t size) -> std::unique_ptr<UringCmdFuture>;
@@ -134,9 +147,7 @@ class ExtentFile {
 };
 
 struct ExtentMeta {
- private:
-  std::shared_ptr<ExtentFile> file_;  // protect by atomic access
- public:
+  std::atomic<std::shared_ptr<ExtentFile>> file_;  // protect by atomic access
   ExtentFileName fn_;
   std::shared_mutex vi_mu_;  // protect value index block
   // below protect by lock in extent storage
@@ -150,13 +161,23 @@ struct ExtentMeta {
   [[nodiscard]] std::shared_lock<std::shared_mutex> lock_shared() {
     return std::shared_lock<std::shared_mutex>(vi_mu_);
   }
-  std::shared_ptr<ExtentFile> GetExtentFile();
   void InitFromEmpty(std::unique_ptr<ExtentFile> f) {
     fn_ = f->file_name();
     meta_block_checksum_ = EMPTY_META_BUF_INST.checksum;
     base_alloc_block_off_ = 0;
     value_index_checksum_ = 0;
     inuse_block_num_ = 0;
+    file_ = std::move(f);
+  }
+  void InitFromExist(std::unique_ptr<ExtentFile> f, char* meta) {
+    fn_ = f->file_name();
+    meta_block_checksum_ = DecodeFixed32(meta);
+    meta += 4;
+    base_alloc_block_off_ = DecodeFixed32(meta);
+    meta += 4;
+    value_index_checksum_ = DecodeFixed32(meta);
+    meta += 4;
+    inuse_block_num_ = DecodeFixed32(meta);
     file_ = std::move(f);
   }
 };

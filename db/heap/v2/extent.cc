@@ -4,7 +4,6 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
-#include <atomic>
 #include <cerrno>
 #include <cstddef>
 #include <cstdint>
@@ -13,31 +12,11 @@
 
 #include "db/heap/io_engine.h"
 #include "rocksdb/status.h"
-// #include "util/coding_lean.h"
-// #include "util/hash.h"
 #include "util/coding_lean.h"
 #include "util/hash.h"
 #include "util/xxhash.h"
 
 namespace HEAPKV_NS_V2 {
-
-std::shared_ptr<ExtentFile> ExtentMeta::GetExtentFile() {
-  return std::atomic_load(&file_);
-  // return Status::OK();
-  // {
-  //   std::shared_lock<std::shared_mutex> g(mu_);
-  //   if (file_ == nullptr) {
-  //     std::unique_ptr<ExtentFile> f;
-  //     Status s = ExtentFile::Open(fn_, std::string(db_name) + "/heap/", &f);
-  //     if (!s.ok()) {
-  //       return s;
-  //     }
-  //     file_.reset(f.release());
-  //   }
-  //   *file = file_;
-  // }
-  // return Status::OK();
-}
 
 Status ExtentFile::Open(ExtentFileName fn, std::string_view base_dir,
                         std::unique_ptr<ExtentFile>* file_ptr) {

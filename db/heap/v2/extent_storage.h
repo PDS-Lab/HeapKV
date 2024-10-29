@@ -10,6 +10,7 @@
 
 #include "cache/cache_helpers.h"
 #include "cache/cache_key.h"
+#include "db/column_family.h"
 #include "db/heap/utils.h"
 #include "db/heap/v2/extent.h"
 #include "db/heap/v2/heap_value_index.h"
@@ -121,8 +122,8 @@ class ExtentStorage {
  private:
   using ExtentList = std::array<ExtentMeta, 4096>;  // 32MiB * 4096 = 128GiB
   using SortSet = std::set<ExtentSpace, ExtentComp>;
+  const ColumnFamilyData* cfd_;
   const std::string db_name_;
-  const double heap_extent_allocatable_threshold_ = 0.3;
   CacheKey hv_cache_key_;
   CacheKey vi_cache_key_;
   std::shared_ptr<Cache> heap_value_cache_;
@@ -133,19 +134,22 @@ class ExtentStorage {
   uint32_t next_extent_file_number_;
   std::unordered_set<uint32_t> lock_map_;
   std::unordered_set<uint32_t> free_space_map_;
-  // std::unordered_set<ExtentFileName> lock_map_;
-  // std::priority_queue<ExtentSpace, std::vector<ExtentSpace>, ExtentComp>
-  //     sort_extents_;
-
-  // log::Writer manifest_;
-
- private:
-  // using CacheInterface =
-  //     BasicTypedCacheInterface<ExtentFile, CacheEntryRole::kMisc>;
-  // using TypedHandle = CacheInterface::TypedHandle;
-  // CacheInterface file_cache_;  // store all opened extent
 
  public:
+  static Status OpenStorage(std::string_view db_name, ColumnFamilyData* cfd,
+                            std::unique_ptr<ExtentStorage>* storage);
+  ExtentStorage(std::string_view db_name, ColumnFamilyData* cfd)
+      : cfd_(cfd),
+        db_name_(db_name),
+        heap_value_cache_(cfd->ioptions()->heap_value_cache) {
+    if (heap_value_cache_) {
+      hv_cache_key_ =
+          CacheKey::CreateUniqueForCacheLifetime(heap_value_cache_.get());
+      vi_cache_key_ =
+          CacheKey::CreateUniqueForCacheLifetime(heap_value_cache_.get());
+    }
+  }
+
   const std::string& db_name() const { return db_name_; }
   // fetch value
   auto GetHeapValueAsync(const ReadOptions& ro, UringIoEngine* io_engine,
@@ -170,7 +174,7 @@ class ExtentStorage {
                       ValueAddr* value_addr);
   bool ExtentCanAlloc(uint32_t alloc_off) const {
     return double(kExtentBlockNum - alloc_off) / double(kExtentBlockNum) >
-           heap_extent_allocatable_threshold_;
+           cfd_->ioptions()->heap_extent_allocatable_threshold;
   }
 };
 

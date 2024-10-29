@@ -25,7 +25,7 @@ ExtentAllocCtx::ExtentAllocCtx(ExtentMeta* meta, const Slice& value_index_block)
       fn_(meta->fn_),
       alloc_off_(meta->base_alloc_block_off_),
       cursor_(0),
-      file_(meta->GetExtentFile()) {
+      file_(meta->file_.load()) {
   size_t n = value_index_block.size() / sizeof(ValueAddr);
   value_index_block_.reserve(n);
   const char* cur = value_index_block.data();
@@ -38,7 +38,7 @@ Status ExtentAllocCtx::FromMeta(UringIoEngine* io_engine,
                                 ExtentStorage* storage, ExtentMeta* meta,
                                 std::unique_ptr<ExtentAllocCtx>* ctx) {
   PinnableSlice value_index_block;
-  auto file = meta->GetExtentFile();
+  auto file = meta->file_.load();
   Status s =
       storage->GetValueIndexBlock(io_engine, meta, &file, &value_index_block);
   if (!s.ok()) {

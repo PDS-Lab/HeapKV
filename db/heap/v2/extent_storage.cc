@@ -3,13 +3,18 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
+#include <cstring>
+#include <filesystem>
+#include <format>
 #include <memory>
 #include <mutex>
 
 #include "cache/cache_helpers.h"
 #include "cache/typed_cache.h"
 #include "db/heap/io_engine.h"
+#include "db/heap/utils.h"
 #include "db/heap/v2/extent.h"
+#include "logging/logging.h"
 #include "memory/memory_allocator_impl.h"
 #include "rocksdb/slice.h"
 #include "rocksdb/status.h"
@@ -32,6 +37,82 @@ ExtentMeta* ExtentStorage::GetExtentMeta(uint32_t file_number) {
   return &list->at(file_number -
                    i1 * (sizeof(ExtentList) / sizeof(ExtentMeta)));
 };
+
+Status ExtentStorage::OpenStorage(std::string_view db_name,
+                                  ColumnFamilyData* cfd,
+                                  std::unique_ptr<ExtentStorage>* storage) {
+  auto io_engine = GetThreadLocalIoEngine();
+  const std::string root_dir{std::format("{}/heap", db_name)};
+  struct ExtentOpenCtx {
+    ExtentFileName file_name;
+    size_t file_size;
+    std::unique_ptr<UringCmdFuture> f;
+    std::unique_ptr<ExtentFile> file;
+    ExtentMeta* meta;
+  };
+  auto es = std::make_unique<ExtentStorage>(db_name, cfd);
+  std::vector<ExtentOpenCtx> async_handle;
+  for (auto const& dir_entry : std::filesystem::directory_iterator(root_dir)) {
+    auto fn = dir_entry.path().filename().string();
+    if (dir_entry.is_regular_file() && fn.ends_with(".heap")) {
+      auto file_name = ExtentFileName::FromString(fn);
+      ROCKS_LOG_DEBUG(cfd->ioptions()->logger, "open file %s", fn.c_str());
+      async_handle.emplace_back(ExtentOpenCtx{
+          .file_name = file_name,
+          .file_size = dir_entry.file_size(),
+          .f = ExtentFile::OpenAsync(io_engine, file_name, root_dir),
+          .meta = es->GetExtentMeta(file_name.file_number_),
+      });
+    }
+  }
+
+  constexpr size_t concurrency = 128;
+  char* buffer_pool =
+      static_cast<char*>(std::aligned_alloc(kBlockSize, 128 * kBlockSize));
+  auto _ = finally([b = buffer_pool]() { free(b); });
+
+  auto init_meta = [&](size_t index, char* buf) -> Status {
+    auto& h = async_handle[index];
+    h.f->Wait();
+    if (h.f->Result() < 0) {
+      return Status::IOError(
+          std::format("failed to read extent meta, file_name: {}, strerror: {}",
+                      h.file_name.ToString(), strerror(-h.f->Result())));
+    }
+    h.meta->InitFromExist(std::move(h.file),
+                          buffer_pool + kBlockSize * (index % concurrency));
+    return Status::OK();
+  };
+
+  for (size_t i = 0; i < async_handle.size(); i++) {
+    auto& h = async_handle[i];
+    h.f->Wait();
+    if (h.f->Result() < 0) {
+      return Status::IOError(std::format("failed to open file {}, strerrno: {}",
+                                         h.file_name.ToString(),
+                                         strerror(-h.f->Result())));
+    }
+    h.file =
+        std::make_unique<ExtentFile>(h.file_name, h.f->Result(), h.file_size);
+    size_t off = i % concurrency;
+    char* buf = buffer_pool + off * kBlockSize;
+    if (i >= concurrency) {
+      if (Status s = init_meta(i - concurrency, buf); !s.ok()) {
+        return s;
+      }
+    }
+    auto rf = h.file->ReadMetaAsync(io_engine, buf);
+    h.f.swap(rf);
+  }
+  for (size_t i = concurrency * (async_handle.size() / concurrency);
+       i < async_handle.size(); i++) {
+    char* buf = buffer_pool + kBlockSize * (i % concurrency);
+    if (Status s = init_meta(i, buf); !s.ok()) {
+      return s;
+    }
+  }
+  return Status::OK();
+}
 
 Status ExtentStorage::GetValueAddr(UringIoEngine* io_engine, ExtentMeta* meta,
                                    uint32_t value_index,
@@ -74,7 +155,7 @@ auto ExtentStorage::GetHeapValueAsync(
   // read heap value
   ValueAddr va = hvi.value_addr_;
   ExtentMeta* meta = GetExtentMeta(hvi.extent_.file_number_);
-  std::shared_ptr<ExtentFile> file = meta->GetExtentFile();
+  std::shared_ptr<ExtentFile> file = meta->file_.load();
   if (hvi.extent_.file_epoch_ != file->file_name().file_epoch_) {
     // ultra slow path
     // gc happened, we need to fetch new value addr through value index
@@ -191,7 +272,7 @@ auto ExtentStorage::GetValueIndexBlock(
   // lock for reading value index and insert to cache
   auto meta_lock = meta->lock_shared();
   // update file, there might be gc exchange
-  *file = meta->GetExtentFile();
+  *file = meta->file_.load();
   auto f = file->get();
   // maybe after gc so update key
   key = ValueIndexCacheKey(vi_cache_key_, f->file_name());
