@@ -20,12 +20,15 @@
 
 namespace HEAPKV_NS_V2 {
 
-ExtentAllocCtx::ExtentAllocCtx(ExtentMeta* meta, const Slice& value_index_block)
+ExtentAllocCtx::ExtentAllocCtx(ExtentMeta* meta, ExtentFileName file_name,
+                               uint32_t base_alloc_block_off,
+                               std::shared_ptr<ExtentFile> file,
+                               const Slice& value_index_block)
     : meta_(meta),
-      fn_(meta->fn_),
-      alloc_off_(meta->base_alloc_block_off_),
-      cursor_(0),
-      file_(meta->file_.load()) {
+      fn_(file_name),
+      base_alloc_block_off_(base_alloc_block_off),
+      alloc_off_(base_alloc_block_off),
+      file_(std::move(file)) {
   size_t n = value_index_block.size() / sizeof(ValueAddr);
   value_index_block_.reserve(n);
   const char* cur = value_index_block.data();
@@ -38,13 +41,15 @@ Status ExtentAllocCtx::FromMeta(UringIoEngine* io_engine,
                                 ExtentStorage* storage, ExtentMeta* meta,
                                 std::unique_ptr<ExtentAllocCtx>* ctx) {
   PinnableSlice value_index_block;
-  auto file = meta->file_.load();
+  auto file = meta->file();
   Status s =
       storage->GetValueIndexBlock(io_engine, meta, &file, &value_index_block);
   if (!s.ok()) {
     return s;
   }
-  *ctx = std::make_unique<ExtentAllocCtx>(meta, value_index_block);
+  auto mi = meta->meta();
+  *ctx = std::make_unique<ExtentAllocCtx>(
+      meta, mi.fn_, mi.base_alloc_block_off_, file, value_index_block);
   return Status::OK();
 }
 
@@ -156,9 +161,8 @@ Status HeapAllocJob::Finish(bool commit) {
   // 3. unlock extent
   for (auto& ctx : locked_extents_) {
     cfd_->extent_storage()->FreeExtentAfterAlloc(
-        ctx->file_name(), commit && s.ok()
-                              ? ctx->cur_b_off()
-                              : ctx->meta()->base_alloc_block_off_);
+        ctx->file_name(),
+        commit && s.ok() ? ctx->cur_b_off() : ctx->base_b_off());
   }
   return s;
 }

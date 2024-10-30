@@ -18,6 +18,7 @@ class ExtentAllocCtx {
  private:
   ExtentMeta* meta_;
   ExtentFileName fn_;
+  const uint32_t base_alloc_block_off_;
   uint32_t alloc_off_;
   uint32_t cursor_;
   std::shared_ptr<ExtentFile> file_;
@@ -27,10 +28,14 @@ class ExtentAllocCtx {
   static Status FromMeta(UringIoEngine* io_engine, ExtentStorage* storage,
                          ExtentMeta* meta,
                          std::unique_ptr<ExtentAllocCtx>* ctx);
-  ExtentAllocCtx(ExtentMeta* meta, const Slice& value_index_block);
+  ExtentAllocCtx(ExtentMeta* meta, ExtentFileName file_name,
+                 uint32_t base_alloc_block_off,
+                 std::shared_ptr<ExtentFile> file,
+                 const Slice& value_index_block);
   ExtentMeta* meta() { return meta_; }
   ExtentFileName file_name() const { return fn_; }
   ExtentFile* file() const { return file_.get(); }
+  uint32_t base_b_off() const { return base_alloc_block_off_; }
   uint32_t cur_b_off() const { return alloc_off_; }
   ValueAddr GetAddr(uint32_t value_index) const {
     return value_index_block_[value_index];

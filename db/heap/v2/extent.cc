@@ -134,19 +134,26 @@ Status ExtentFile::UpdateAferAlloc(UringIoEngine* io_engine, ExtentMeta* meta,
       Lower32of64(XXH3_64bits(static_cast<char*>(buffer) + 4, kBlockSize - 4));
   EncodeFixed32(cursor, meta_block_checksum);
   // 2. lock and write
-  auto meta_lock = meta->lock();
-  auto f = io_engine->Write(UringIoOptions{}, fd_, buffer, n, kExtentDataSize);
-  f->Wait();
-  if (f->Result() < 0) {
-    return Status::IOError(
-        "write meta and value index failed: " + file_name_.ToString(),
-        strerror(-f->Result()));
+  {
+    auto meta_lock = meta->lock_vi();
+    auto f =
+        io_engine->Write(UringIoOptions{}, fd_, buffer, n, kExtentDataSize);
+    f->Wait();
+    if (f->Result() < 0) {
+      return Status::IOError(
+          "write meta and value index failed: " + file_name_.ToString(),
+          strerror(-f->Result()));
+    }
+    file_size_ = kExtentDataSize + n;
   }
-  meta->base_alloc_block_off_ = base_alloc_block_off;
-  meta->value_index_checksum_ = value_index_checksum;
-  meta->inuse_block_num_ = block_inuse;
-  meta->meta_block_checksum_ = meta_block_checksum;
-  file_size_ = kExtentDataSize + n;
+  // 3. update meta
+  ExtentMeta::MetaInfo mi;
+  mi.fn_ = file_name_;
+  mi.base_alloc_block_off_ = base_alloc_block_off;
+  mi.value_index_checksum_ = value_index_checksum;
+  mi.inuse_block_num_ = block_inuse;
+  mi.meta_block_checksum_ = meta_block_checksum;
+  meta->UpdateMeta(mi);
   return Status::OK();
 }
 

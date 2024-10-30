@@ -116,8 +116,9 @@ Status ExtentStorage::OpenStorage(std::string_view db_name,
   }
   es->next_extent_file_number_ = async_handle.size();
   for (size_t i = 0; i < async_handle.size(); i++) {
-    es->FreeExtentAfterAlloc(async_handle[i].file_name,
-                             async_handle[i].meta->base_alloc_block_off_);
+    es->FreeExtentAfterAlloc(
+        async_handle[i].file_name,
+        async_handle[i].meta->meta().base_alloc_block_off_);
   }
   *storage = std::move(es);
   return Status::OK();
@@ -164,7 +165,7 @@ auto ExtentStorage::GetHeapValueAsync(
   // read heap value
   ValueAddr va = hvi.value_addr_;
   ExtentMeta* meta = GetExtentMeta(hvi.extent_.file_number_);
-  std::shared_ptr<ExtentFile> file = meta->file_.load();
+  std::shared_ptr<ExtentFile> file = meta->file();
   if (hvi.extent_.file_epoch_ != file->file_name().file_epoch_) {
     // ultra slow path
     // gc happened, we need to fetch new value addr through value index
@@ -278,13 +279,13 @@ auto ExtentStorage::GetValueIndexBlock(
       return Status::OK();
     }
   }
-  // lock for reading value index and insert to cache
-  auto meta_lock = meta->lock_shared();
   // update file, there might be gc exchange
-  *file = meta->file_.load();
+  *file = meta->file();
   auto f = file->get();
   // maybe after gc so update key
   key = ValueIndexCacheKey(vi_cache_key_, f->file_name());
+  // lock for reading value index and insert to cache
+  auto meta_lock = meta->lock_shared_vi();
 
   size_t n = f->value_index_size();
   if (n == 0) {  // empty file
@@ -339,11 +340,12 @@ auto ExtentStorage::GetExtentForAlloc(ExtentMeta** meta,
     std::lock_guard<std::mutex> g(mu_);
     for (auto it = free_space_map_.begin(); it != free_space_map_.end(); it++) {
       ExtentMeta* m = GetExtentMeta(*it);
-      if (kExtentBlockNum - m->base_alloc_block_off_ < min_free_block) {
+      auto mi = m->meta();
+      if (kExtentBlockNum - mi.base_alloc_block_off_ < min_free_block) {
         continue;
       }
       *meta = m;
-      lock_map_.insert(m->fn_.file_number_);
+      lock_map_.insert(mi.fn_.file_number_);
       free_space_map_.erase(it);
       return Status::OK();
     }

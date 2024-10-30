@@ -48,6 +48,7 @@ struct HeapValueIndex {
   static HeapValueIndex DecodeFrom(const Slice& raw);
 
   bool operator==(const HeapValueIndex& other) const {
+    // value addr might change from time to time
     return value_checksum_ == other.value_checksum_ &&
            extent_.file_number_ == other.extent_.file_number_ &&
            value_index_ == other.value_index_ && seq_num() == other.seq_num();

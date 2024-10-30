@@ -83,7 +83,7 @@ struct ValueAddr {
 
 using ExtentValueIndex = std::vector<ValueAddr>;
 struct HeapValueIndex;
-struct ExtentMeta;
+class ExtentMeta;
 
 class ExtentFile {
  private:
@@ -145,39 +145,62 @@ class ExtentFile {
   Status ReflinkFrom(const ExtentFile* source_file);
 };
 
-struct ExtentMeta {
-  std::atomic<std::shared_ptr<ExtentFile>> file_;  // protect by atomic access
-  ExtentFileName fn_;
-  std::shared_mutex vi_mu_;  // protect value index block
+class ExtentMeta {
+ public:
+  struct MetaInfo {
+    ExtentFileName fn_;
+    uint32_t meta_block_checksum_;
+    uint32_t base_alloc_block_off_;
+    uint32_t value_index_checksum_;
+    uint32_t inuse_block_num_;
+  };
+
+ private:
+  mutable std::shared_mutex vi_mu_;  // protect value index block
   // below protect by lock in extent storage
-  uint32_t meta_block_checksum_;
-  uint32_t base_alloc_block_off_;
-  uint32_t value_index_checksum_;
-  uint32_t inuse_block_num_;
-  [[nodiscard]] std::unique_lock<std::shared_mutex> lock() {
+  mutable std::shared_mutex meta_mu_;
+  std::shared_ptr<ExtentFile> file_;  // protect by atomic access
+  MetaInfo meta_;
+
+ public:
+  [[nodiscard]] std::unique_lock<std::shared_mutex> lock_vi() {
     return std::unique_lock<std::shared_mutex>{vi_mu_};
   }
-  [[nodiscard]] std::shared_lock<std::shared_mutex> lock_shared() {
+  [[nodiscard]] std::shared_lock<std::shared_mutex> lock_shared_vi() {
     return std::shared_lock<std::shared_mutex>(vi_mu_);
   }
+  std::shared_ptr<ExtentFile> file() {
+    std::shared_lock<std::shared_mutex> g(meta_mu_);
+    return file_;
+  }
+  MetaInfo meta() const {
+    std::shared_lock<std::shared_mutex> g(meta_mu_);
+    return meta_;
+  }
   void InitFromEmpty(std::unique_ptr<ExtentFile> f) {
-    fn_ = f->file_name();
-    meta_block_checksum_ = EMPTY_META_BUF_INST.checksum;
-    base_alloc_block_off_ = 0;
-    value_index_checksum_ = 0;
-    inuse_block_num_ = 0;
+    std::lock_guard<std::shared_mutex> g(meta_mu_);
+    meta_.fn_ = f->file_name();
+    meta_.meta_block_checksum_ = EMPTY_META_BUF_INST.checksum;
+    meta_.base_alloc_block_off_ = 0;
+    meta_.value_index_checksum_ = 0;
+    meta_.inuse_block_num_ = 0;
     file_ = std::move(f);
   }
-  void InitFromExist(std::unique_ptr<ExtentFile> f, char* meta) {
-    fn_ = f->file_name();
-    meta_block_checksum_ = DecodeFixed32(meta);
-    meta += 4;
-    base_alloc_block_off_ = DecodeFixed32(meta);
-    meta += 4;
-    value_index_checksum_ = DecodeFixed32(meta);
-    meta += 4;
-    inuse_block_num_ = DecodeFixed32(meta);
+  void InitFromExist(std::unique_ptr<ExtentFile> f, char* buf) {
+    std::lock_guard<std::shared_mutex> g(meta_mu_);
+    meta_.fn_ = f->file_name();
+    meta_.meta_block_checksum_ = DecodeFixed32(buf);
+    buf += 4;
+    meta_.base_alloc_block_off_ = DecodeFixed32(buf);
+    buf += 4;
+    meta_.value_index_checksum_ = DecodeFixed32(buf);
+    buf += 4;
+    meta_.inuse_block_num_ = DecodeFixed32(buf);
     file_ = std::move(f);
+  }
+  void UpdateMeta(MetaInfo meta) {
+    std::lock_guard<std::shared_mutex> g(meta_mu_);
+    meta_ = meta;
   }
 };
 
