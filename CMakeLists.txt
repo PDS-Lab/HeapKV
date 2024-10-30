@@ -685,6 +685,7 @@ set(SOURCES
   db/heap/v2/extent_storage.cc
   db/heap/v2/extent.cc
   db/heap/v2/heap_alloc_job.cc
+  db/heap/v2/heap_garbage_collector.cc
 
   # db/heap/bitmap_allocator.cc
   # db/heap/extent.cc

@@ -38,7 +38,7 @@ struct HeapValueIndex {
                  uint32_t value_size, uint32_t value_checksum,
                  CompressionType compression_type)
       : HeapValueIndex(extent, value_addr, value_index, value_size,
-                       value_checksum, seq << 8 || compression_type) {}
+                       value_checksum, seq << 8 | compression_type) {}
   CompressionType compression_type() const {
     return CompressionType(packed_seqnum_compression_type_ & 0xff);
   }
@@ -46,14 +46,24 @@ struct HeapValueIndex {
   void EncodeTo(char* dst);
   void EncodeTo(std::string* dst);
   static HeapValueIndex DecodeFrom(const Slice& raw);
+
+  bool operator==(const HeapValueIndex& other) const {
+    return value_checksum_ == other.value_checksum_ &&
+           extent_.file_number_ == other.extent_.file_number_ &&
+           value_index_ == other.value_index_ && seq_num() == other.seq_num();
+  }
+
+  bool operator!=(const HeapValueIndex& other) const {
+    return !(*this == other);
+  }
 };
 
 static constexpr size_t kIndexSize = sizeof(HeapValueIndex);
 
 inline void HeapValueIndex::EncodeTo(char* dst) {
-  EncodeFixed32(dst, extent_.file_epoch_);
-  dst += 4;
   EncodeFixed32(dst, extent_.file_number_);
+  dst += 4;
+  EncodeFixed32(dst, extent_.file_epoch_);
   dst += 4;
   EncodeFixed16(dst, value_addr_.b_off());
   dst += 2;
@@ -69,8 +79,8 @@ inline void HeapValueIndex::EncodeTo(char* dst) {
 }
 
 inline void HeapValueIndex::EncodeTo(std::string* dst) {
-  PutFixed32(dst, extent_.file_epoch_);
   PutFixed32(dst, extent_.file_number_);
+  PutFixed32(dst, extent_.file_epoch_);
   PutFixed16(dst, value_addr_.b_off());
   PutFixed16(dst, value_addr_.b_cnt());
   PutFixed32(dst, value_index_);
@@ -98,3 +108,20 @@ inline HeapValueIndex HeapValueIndex::DecodeFrom(const Slice& raw) {
 }
 
 }  // namespace HEAPKV_NS_V2
+
+namespace std {
+// write formatter for error_code
+template <>
+struct formatter<HEAPKV_NS_V2::HeapValueIndex> {
+  constexpr auto parse(std::format_parse_context& ctx) { return ctx.begin(); }
+  auto format(const HEAPKV_NS_V2::HeapValueIndex& hvi,
+              std::format_context& ctx) const {
+    return format_to(ctx.out(),
+                     "heap_value_index{{ .extent:{}, .va: {}-{}, vi: {}, size: "
+                     "{}, seq: {} }}",
+                     hvi.extent_.ToString(), hvi.value_addr_.b_off(),
+                     hvi.value_addr_.b_cnt(), hvi.value_index_, hvi.value_size_,
+                     hvi.seq_num());
+  }
+};
+}  // namespace std

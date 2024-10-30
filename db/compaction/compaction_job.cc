@@ -11,6 +11,7 @@
 
 #include <algorithm>
 #include <cinttypes>
+#include <iostream>
 #include <memory>
 #include <optional>
 #include <set>
@@ -27,7 +28,7 @@
 #include "db/dbformat.h"
 #include "db/error_handler.h"
 #include "db/event_helpers.h"
-#include "db/heap/heap_garbage_collector.h"
+#include "db/heap/v2/heap_garbage_collector.h"
 #include "db/history_trimming_iterator.h"
 #include "db/log_writer.h"
 #include "db/merge_helper.h"
@@ -1225,12 +1226,11 @@ void CompactionJob::ProcessKeyValueCompaction(SubcompactionState* sub_compact) {
   std::unique_ptr<InternalIterator> heap_value_checker;
 
   if (sub_compact->compaction->immutable_options()->enable_heapkv) {
-    // auto collector =
-    // sub_compact->Current().CreateHeapValueGarbageCollector();
-    // heap_value_checker =
-    // std::make_unique<heapkv::HeapValueGarbageCheckIterator>(
-    //     input, collector);
-    // input = heap_value_checker.get();
+    auto collector = sub_compact->Current().CreateHeapValueGarbageCollector();
+    heap_value_checker =
+        std::make_unique<heapkv::v2::HeapValueGarbageCheckIterator>(input,
+                                                                    collector);
+    input = heap_value_checker.get();
   }
 
   std::unique_ptr<InternalIterator> trim_history_iter;
@@ -1767,7 +1767,7 @@ Status CompactionJob::InstallCompactionResults(
   compaction->AddInputDeletions(edit);
 
   std::unordered_map<uint64_t, BlobGarbageMeter::BlobStats> blob_total_garbage;
-  std::vector<heapkv::ExtentGarbageSpan> heap_total_garbage;
+  std::vector<heapkv::v2::CompactionHeapGarbage> heap_total_garbage;
 
   for (const auto& sub_compact : compact_->sub_compact_states) {
     sub_compact.AddOutputsEdit(edit);
@@ -1791,20 +1791,26 @@ Status CompactionJob::InstallCompactionResults(
       }
     }
 
-    // if (sub_compact.Current().GetHeapValueGarbageCollector()) {
-    //   auto res = sub_compact.Current()
-    //                  .GetHeapValueGarbageCollector()
-    //                  ->FinalizeDropResult();
-    //   heap_total_garbage.insert(heap_total_garbage.end(), res.begin(),
-    //                             res.end());
-    // }
+    if (sub_compact.Current().GetHeapValueGarbageCollector()) {
+      auto res = sub_compact.Current()
+                     .GetHeapValueGarbageCollector()
+                     ->FinalizeDropResult();
+      heap_total_garbage.emplace_back(std::move(res));
+    }
   }
-  // if (!heap_total_garbage.empty()) {
-  //   heapkv::HeapGarbageCollector::CompactDropResult(heap_total_garbage);
-  //   compact_->compaction->column_family_data()
-  //       ->heap_storage()
-  //       ->CommitGarbageBlocks(*compact_->compaction, heap_total_garbage);
-  // }
+  if (!heap_total_garbage.empty()) {
+    // for (auto& [fn, vi_list] : heap_total_garbage[0]) {
+    //   std::cout << fn << ":[";
+    //   for (auto vi : vi_list) {
+    //     std::cout << vi << ",";
+    //   }
+    //   std::cout << "]\n";
+    // }
+    // TODO(wnj): commit garbage
+    // compact_->compaction->column_family_data()
+    //     ->extent_storage()
+    //     ->CommitGarbageBlocks(*compact_->compaction, heap_total_garbage);
+  }
 
   for (const auto& pair : blob_total_garbage) {
     const uint64_t blob_file_number = pair.first;
