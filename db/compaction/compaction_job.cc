@@ -29,6 +29,7 @@
 #include "db/error_handler.h"
 #include "db/event_helpers.h"
 #include "db/heap/v2/heap_garbage_collector.h"
+#include "db/heap/v2/heap_job_center.h"
 #include "db/history_trimming_iterator.h"
 #include "db/log_writer.h"
 #include "db/merge_helper.h"
@@ -1767,7 +1768,7 @@ Status CompactionJob::InstallCompactionResults(
   compaction->AddInputDeletions(edit);
 
   std::unordered_map<uint64_t, BlobGarbageMeter::BlobStats> blob_total_garbage;
-  std::vector<heapkv::v2::CompactionHeapGarbage> heap_total_garbage;
+  heapkv::v2::CompactionHeapGarbage heap_total_garbage;
 
   for (const auto& sub_compact : compact_->sub_compact_states) {
     sub_compact.AddOutputsEdit(edit);
@@ -1795,7 +1796,7 @@ Status CompactionJob::InstallCompactionResults(
       auto res = sub_compact.Current()
                      .GetHeapValueGarbageCollector()
                      ->FinalizeDropResult();
-      heap_total_garbage.emplace_back(std::move(res));
+      heapkv::v2::HeapGarbageCollector::MergeGarbage(&heap_total_garbage, &res);
     }
   }
   if (!heap_total_garbage.empty()) {
@@ -1806,10 +1807,9 @@ Status CompactionJob::InstallCompactionResults(
     //   }
     //   std::cout << "]\n";
     // }
-    // TODO(wnj): commit garbage
-    // compact_->compaction->column_family_data()
-    //     ->extent_storage()
-    //     ->CommitGarbageBlocks(*compact_->compaction, heap_total_garbage);
+    compact_->compaction->column_family_data()
+        ->heap_job_center()
+        ->CommitGarbage(*compact_->compaction, std::move(heap_total_garbage));
   }
 
   for (const auto& pair : blob_total_garbage) {

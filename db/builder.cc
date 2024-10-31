@@ -19,6 +19,7 @@
 #include "db/compaction/compaction_iterator.h"
 #include "db/dbformat.h"
 #include "db/event_helpers.h"
+#include "db/heap/v2/heap_job_center.h"
 #include "db/internal_stats.h"
 #include "db/merge_helper.h"
 #include "db/output_validator.h"
@@ -200,8 +201,7 @@ Status BuildTable(
 
     std::unique_ptr<heapkv::v2::HeapAllocJob> heap_alloc_job = nullptr;
     if (ioptions.enable_heapkv) {
-      heap_alloc_job = std::make_unique<heapkv::v2::HeapAllocJob>(0, cfd);
-      // heap_alloc_job = cfd->heap_storage()->NewAllocJob();
+      heap_alloc_job = cfd->heap_job_center()->NewAllocJob();
       s = heap_alloc_job->InitJob();
     }
 

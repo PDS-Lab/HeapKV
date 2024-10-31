@@ -53,4 +53,25 @@ auto HeapGarbageCollector::FinalizeDropResult() -> CompactionHeapGarbage {
   return std::move(garbage_);
 }
 
+void HeapGarbageCollector::MergeGarbage(CompactionHeapGarbage* base,
+                                        CompactionHeapGarbage* merge_to_base) {
+  if (merge_to_base->empty()) {
+    return;
+  }
+  for (auto& [fn, g] : *merge_to_base) {
+    auto it = base->find(fn);
+    if (it != base->end()) {
+      it->second.b_cnt_ += g.b_cnt_;
+      it->second.value_index_list_.reserve(it->second.value_index_list_.size() +
+                                           g.value_index_list_.size());
+      it->second.value_index_list_.insert(it->second.value_index_list_.end(),
+                                          g.value_index_list_.begin(),
+                                          g.value_index_list_.end());
+    } else {
+      base->emplace(fn, std::move(g));
+    }
+  }
+  merge_to_base->clear();
+}
+
 }  // namespace HEAPKV_NS_V2

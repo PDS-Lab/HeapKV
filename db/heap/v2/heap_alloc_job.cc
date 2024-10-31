@@ -13,6 +13,7 @@
 #include "db/heap/utils.h"
 #include "db/heap/v2/extent.h"
 #include "db/heap/v2/extent_storage.h"
+#include "db/heap/v2/heap_job_center.h"
 #include "rocksdb/compression_type.h"
 #include "rocksdb/slice.h"
 #include "rocksdb/status.h"
@@ -28,6 +29,7 @@ ExtentAllocCtx::ExtentAllocCtx(ExtentMeta* meta, ExtentFileName file_name,
       fn_(file_name),
       base_alloc_block_off_(base_alloc_block_off),
       alloc_off_(base_alloc_block_off),
+      cursor_(0),
       file_(std::move(file)) {
   size_t n = value_index_block.size() / sizeof(ValueAddr);
   value_index_block_.reserve(n);
@@ -75,6 +77,7 @@ std::optional<uint32_t> ExtentAllocCtx::Alloc(uint16_t b_cnt) {
 HeapAllocJob::~HeapAllocJob() {
   if (buffer1_ != nullptr) free(buffer1_);
   if (buffer2_ != nullptr) free(buffer2_);
+  cfd_->heap_job_center()->NotifyJobDone(job_id_);
 }
 
 Status HeapAllocJob::InitJob() {

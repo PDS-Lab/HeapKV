@@ -29,6 +29,8 @@ class HeapGarbageCollector {
   void InputKeyValue(const Slice& key, const Slice& value);
   Status OutputKeyValue(const Slice& key, const Slice& value);
   auto FinalizeDropResult() -> CompactionHeapGarbage;
+  static void MergeGarbage(CompactionHeapGarbage* base,
+                           CompactionHeapGarbage* merge_to_base);
 };
 
 // An internal iterator that passes each key-value encountered to

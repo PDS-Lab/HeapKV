@@ -28,6 +28,7 @@
 #include "db/dbformat.h"
 #include "db/heap/io_engine.h"
 #include "db/heap/v2/extent_storage.h"
+#include "db/heap/v2/heap_job_center.h"
 #include "db/heap/v2/heap_value_index.h"
 #include "db/internal_stats.h"
 #include "db/log_reader.h"
@@ -5178,10 +5179,9 @@ Status VersionSet::Close(FSDirectory* db_dir, InstrumentedMutex* mu) {
   }
 
   for (const auto cf : *column_family_set_) {
-    // if (cf->heap_storage()) {
-    //   cf->heap_storage()->MarkStop();
-    //   cf->heap_storage()->WaitAllJobDone();
-    // }
+    if (cf->heap_job_center()) {
+      cf->heap_job_center()->WaitJobDone();
+    }
   }
 
   std::string manifest_file_name =

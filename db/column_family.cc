@@ -12,6 +12,7 @@
 #include <algorithm>
 #include <cinttypes>
 #include <limits>
+#include <memory>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -23,6 +24,7 @@
 #include "db/compaction/compaction_picker_level.h"
 #include "db/compaction/compaction_picker_universal.h"
 #include "db/db_impl/db_impl.h"
+#include "db/heap/v2/heap_job_center.h"
 #include "db/internal_stats.h"
 #include "db/job_context.h"
 #include "db/range_del_aggregator.h"
@@ -632,6 +634,7 @@ ColumnFamilyData::ColumnFamilyData(
                         name.c_str(), s.ToString().c_str());
         extent_storage_.reset();
       }
+      heap_job_center_ = std::make_unique<heapkv::v2::HeapJobCenter>(this);
     }
   }
 

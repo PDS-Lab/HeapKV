@@ -52,6 +52,7 @@ namespace heapkv {
 // class CFHeapStorage;
 namespace v2 {
 class ExtentStorage;
+class HeapJobCenter;
 }
 }
 
@@ -389,6 +390,9 @@ class ColumnFamilyData {
   heapkv::v2::ExtentStorage* extent_storage() const {
     return extent_storage_.get();
   }
+  heapkv::v2::HeapJobCenter* heap_job_center() const {
+    return heap_job_center_.get();
+  }
 
   // See documentation in compaction_picker.h
   // REQUIRES: DB mutex held
@@ -596,6 +600,7 @@ class ColumnFamilyData {
   std::unique_ptr<BlobFileCache> blob_file_cache_;
   std::unique_ptr<BlobSource> blob_source_;
   // std::unique_ptr<heapkv::CFHeapStorage> heap_storage_;
+  std::unique_ptr<heapkv::v2::HeapJobCenter> heap_job_center_;
   std::unique_ptr<heapkv::v2::ExtentStorage> extent_storage_;
 
   std::unique_ptr<InternalStats> internal_stats_;
