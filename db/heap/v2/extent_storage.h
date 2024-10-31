@@ -151,6 +151,10 @@ class ExtentStorage {
   }
 
   const std::string& db_name() const { return db_name_; }
+  ExtentMeta* GetExtentMeta(uint32_t file_number);
+  Status GetValueAddr(UringIoEngine* io_engine, ExtentMeta* meta,
+                      uint32_t value_index, std::shared_ptr<ExtentFile>* file,
+                      ValueAddr* value_addr);
   // fetch value
   auto GetHeapValueAsync(const ReadOptions& ro, UringIoEngine* io_engine,
                          const HeapValueIndex& hvi) -> HeapValueGetContext;
@@ -168,10 +172,6 @@ class ExtentStorage {
   // garbage collect
 
  private:
-  ExtentMeta* GetExtentMeta(uint32_t file_number);
-  Status GetValueAddr(UringIoEngine* io_engine, ExtentMeta* meta,
-                      uint32_t value_index, std::shared_ptr<ExtentFile>* file,
-                      ValueAddr* value_addr);
   bool ExtentCanAlloc(uint32_t alloc_off) const {
     return kBlockSize * (kExtentBlockNum - alloc_off) >= (1 << 20);
   }

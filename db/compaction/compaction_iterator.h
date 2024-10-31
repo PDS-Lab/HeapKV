@@ -6,8 +6,10 @@
 
 #include <algorithm>
 #include <cinttypes>
+#include <cstdint>
 #include <deque>
 #include <string>
+#include <unordered_map>
 #include <unordered_set>
 #include <vector>
 
@@ -315,6 +317,10 @@ class CompactionIterator {
   // Return true on success, false on failures (e.g.: kIOError).
   bool InvokeFilterIfNeeded(bool* need_skip, Slice* skip_until);
 
+  // Check whether file_epoch in HeapValueIndex matched with current file epoch.
+  // If not, update file_epoch and ValueAddr
+  bool ReplaceValueAddrIfNeeded();
+
   // Given a sequence number, return the sequence number of the
   // earliest snapshot that this sequence number is visible in.
   // The snapshots themselves are arranged in ascending order of
@@ -473,6 +479,7 @@ class CompactionIterator {
 
   std::string blob_index_;
   std::string heap_value_index_;
+  std::unordered_map<uint32_t, uint32_t> extent_file_epoch_cache_;
   PinnableSlice blob_value_;
   std::string compaction_filter_value_;
   InternalKey compaction_filter_skip_until_;

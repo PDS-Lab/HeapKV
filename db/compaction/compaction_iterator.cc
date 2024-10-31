@@ -12,7 +12,11 @@
 #include "db/blob/blob_file_builder.h"
 #include "db/blob/blob_index.h"
 #include "db/blob/prefetch_buffer_collection.h"
+#include "db/column_family.h"
 #include "db/dbformat.h"
+#include "db/heap/io_engine.h"
+#include "db/heap/v2/extent.h"
+#include "db/heap/v2/heap_value_index.h"
 #include "db/snapshot_checker.h"
 #include "db/wide/wide_column_serialization.h"
 #include "db/wide/wide_columns_helper.h"
@@ -568,6 +572,9 @@ void CompactionIterator::NextFromInput() {
 
       current_key_committed_ = KeyCommitted(ikey_.sequence);
 
+      if (current_key_committed_) {
+        ReplaceValueAddrIfNeeded();
+      }
       // Apply the compaction filter to the first committed version of the user
       // key.
       if (current_key_committed_ &&
@@ -592,6 +599,9 @@ void CompactionIterator::NextFromInput() {
         current_key_committed_ = KeyCommitted(ikey_.sequence);
         // Apply the compaction filter to the first committed version of the
         // user key.
+        if (current_key_committed_) {
+          ReplaceValueAddrIfNeeded();
+        }
         if (current_key_committed_ &&
             !InvokeFilterIfNeeded(&need_skip, &skip_until)) {
           break;
@@ -1223,6 +1233,52 @@ void CompactionIterator::GarbageCollectBlobIfNeeded() {
       return;
     }
   }
+}
+
+bool CompactionIterator::ReplaceValueAddrIfNeeded() {
+  if (ikey_.type != kTypeHeapValueIndex) {
+    return true;
+  }
+  if (compaction_ == nullptr) {
+    return true;
+  }
+  ColumnFamilyData* cfd = nullptr;
+  if (compaction_->input_version() != nullptr) {
+    cfd = compaction_->input_version()->cfd();
+  }
+  if (cfd == nullptr && compaction_->real_compaction() != nullptr) {
+    cfd = compaction_->real_compaction()->column_family_data();
+  }
+  if (cfd == nullptr || cfd->extent_storage() == nullptr) {
+    return true;
+  }
+  auto hvi = heapkv::v2::HeapValueIndex::DecodeFrom(value_);
+  auto it = extent_file_epoch_cache_.find(hvi.extent_.file_number_);
+  if (it != extent_file_epoch_cache_.end() &&
+      hvi.extent_.file_epoch_ == it->second) {
+    return true;
+  }
+  auto meta = cfd->extent_storage()->GetExtentMeta(hvi.extent_.file_number_);
+  auto file = meta->file();
+  auto file_name = file->file_name();
+  extent_file_epoch_cache_[file_name.file_number_] = file_name.file_epoch_;
+  if (hvi.extent_.file_epoch_ == file_name.file_epoch_) {
+    return true;
+  }
+  heapkv::v2::ValueAddr va;
+  Status s = cfd->extent_storage()->GetValueAddr(
+      heapkv::GetThreadLocalIoEngine(), meta, hvi.value_index_, &file, &va);
+  if (!s.ok()) {
+    return false;
+  }
+  file_name = file->file_name();
+  extent_file_epoch_cache_[file_name.file_number_] = file_name.file_epoch_;
+  hvi.extent_.file_epoch_ = file_name.file_epoch_;
+  hvi.value_addr_ = va;
+  heap_value_index_.clear();
+  hvi.EncodeTo(&heap_value_index_);
+  value_ = heap_value_index_;
+  return true;
 }
 
 void CompactionIterator::DecideOutputLevel() {
