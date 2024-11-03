@@ -1796,7 +1796,7 @@ Status CompactionJob::InstallCompactionResults(
       auto res = sub_compact.Current()
                      .GetHeapValueGarbageCollector()
                      ->FinalizeDropResult();
-      heapkv::v2::HeapGarbageCollector::MergeGarbage(&heap_total_garbage, &res);
+      heapkv::v2::MergeGarbage(&heap_total_garbage, &res);
     }
   }
   if (!heap_total_garbage.empty()) {
@@ -1809,7 +1809,7 @@ Status CompactionJob::InstallCompactionResults(
     // }
     compact_->compaction->column_family_data()
         ->heap_job_center()
-        ->CommitGarbage(*compact_->compaction, std::move(heap_total_garbage));
+        ->SubmitGarbage(*compact_->compaction, std::move(heap_total_garbage));
   }
 
   for (const auto& pair : blob_total_garbage) {

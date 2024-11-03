@@ -116,9 +116,8 @@ Status ExtentStorage::OpenStorage(std::string_view db_name,
   }
   es->next_extent_file_number_ = async_handle.size();
   for (size_t i = 0; i < async_handle.size(); i++) {
-    es->FreeExtentAfterAlloc(
-        async_handle[i].file_name,
-        async_handle[i].meta->meta().base_alloc_block_off_);
+    es->UnlockExtent(async_handle[i].file_name.file_number_,
+                     async_handle[i].meta->meta().base_alloc_block_off_);
   }
   *storage = std::move(es);
   return Status::OK();
@@ -358,7 +357,7 @@ auto ExtentStorage::GetExtentForAlloc(ExtentMeta** meta,
   }
   std::unique_ptr<ExtentFile> file;
   Status s = ExtentFile::Create(ExtentFileName(file_number, 0),
-                                db_name_ + "/heapkv/", &file);
+                                base_extent_file_dir_, &file);
   if (!s.ok()) {
     return s;
   }
@@ -372,13 +371,12 @@ auto ExtentStorage::GetExtentForAlloc(ExtentMeta** meta,
   return Status::OK();
 }
 
-void ExtentStorage::FreeExtentAfterAlloc(ExtentFileName file_name,
-                                         uint32_t alloc_off) {
+void ExtentStorage::UnlockExtent(uint32_t file_number, uint32_t alloc_off) {
   bool can_alloc = ExtentCanAlloc(alloc_off);
   std::lock_guard<std::mutex> g(mu_);
-  lock_map_.erase(file_name.file_number_);
+  lock_map_.erase(file_number);
   if (can_alloc) {
-    free_space_map_.insert(file_name.file_number_);
+    free_space_map_.insert(file_number);
   }
 }
 
@@ -387,6 +385,16 @@ void ExtentStorage::EvictValueIndexCache(ExtentFileName file_name) {
     ValueIndexCacheKey key(vi_cache_key_, file_name);
     heap_value_cache_->Erase(GetSliceForKey(&key));
   }
+}
+
+bool ExtentStorage::LockExtentForGc(uint32_t file_number) {
+  std::lock_guard<std::mutex> g(mu_);
+  if (lock_map_.contains(file_number)) {
+    return false;
+  }
+  lock_map_.insert(file_number);
+  free_space_map_.erase(file_number);
+  return true;
 }
 
 }  // namespace HEAPKV_NS_V2

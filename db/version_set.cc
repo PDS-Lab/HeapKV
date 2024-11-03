@@ -5178,12 +5178,6 @@ Status VersionSet::Close(FSDirectory* db_dir, InstrumentedMutex* mu) {
     return s;
   }
 
-  for (const auto cf : *column_family_set_) {
-    if (cf->heap_job_center()) {
-      cf->heap_job_center()->WaitJobDone();
-    }
-  }
-
   std::string manifest_file_name =
       DescriptorFileName(dbname_, manifest_file_number_);
   uint64_t size = 0;

@@ -71,7 +71,11 @@ struct ValueAddr {
   uint16_t b_off() const { return b_off_; }
   uint16_t b_cnt() const { return b_cnt_; }
   bool has_value() const { return b_cnt() != 0; }
-  char* EncodeTo(char* buf) {
+  void reset() {
+    b_cnt_ = 0;
+    b_off_ = 0;
+  }
+  char* EncodeTo(char* buf) const {
     EncodeFixed16(buf, b_off_);
     EncodeFixed16(buf + 2, b_cnt_);
     return buf + 4;
@@ -114,7 +118,7 @@ class ExtentFile {
                      std::unique_ptr<ExtentFile>* file_ptr);
   static Status Create(ExtentFileName fn, std::string_view base_dir,
                        std::unique_ptr<ExtentFile>* file_ptr);
-
+  int fd() const { return fd_; }
   auto ReadValueAsync(UringIoEngine* io_engine, ValueAddr addr,
                       void* buf) -> std::unique_ptr<UringCmdFuture>;
   Status ReadValue(UringIoEngine* io_engine, ValueAddr addr, void* buf);
@@ -129,9 +133,8 @@ class ExtentFile {
   //                          void* buf) -> std::unique_ptr<UringCmdFuture>;
   Status ReadValueIndex(UringIoEngine* io_engine, void* buf);
 
-  Status UpdateAferAlloc(UringIoEngine* io_engine, ExtentMeta* meta,
-                         uint32_t base_alloc_block_off,
-                         const ExtentValueIndex& index_block, void* buffer);
+  Status UpdateValueIndex(UringIoEngine* io_engine, ExtentMeta* meta,
+                          const ExtentValueIndex& index_block, void* buffer);
 
   ExtentFileName file_name() const { return file_name_; }
   size_t value_index_size() const {
@@ -201,6 +204,12 @@ class ExtentMeta {
   void UpdateMeta(MetaInfo meta) {
     std::lock_guard<std::shared_mutex> g(meta_mu_);
     meta_ = meta;
+  }
+  void UpdateMetaAndFile(MetaInfo meta, std::unique_ptr<ExtentFile> new_file) {
+    auto vig = lock_vi();
+    std::shared_lock<std::shared_mutex> g(meta_mu_);
+    meta_ = meta;
+    file_ = std::move(new_file);
   }
 };
 

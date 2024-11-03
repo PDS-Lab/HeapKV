@@ -152,8 +152,8 @@ Status HeapAllocJob::Finish(bool commit) {
       auto g = finally([buf = buf]() { free(buf); });
       // 2. generate meta, index and write
       for (auto& ctx : locked_extents_) {
-        s = ctx->file()->UpdateAferAlloc(
-            io_engine_, ctx->meta(), ctx->cur_b_off(), ctx->value_index(), buf);
+        s = ctx->file()->UpdateValueIndex(io_engine_, ctx->meta(),
+                                          ctx->value_index(), buf);
         if (!s.ok()) {
           break;
         }
@@ -163,8 +163,8 @@ Status HeapAllocJob::Finish(bool commit) {
   }
   // 3. unlock extent
   for (auto& ctx : locked_extents_) {
-    cfd_->extent_storage()->FreeExtentAfterAlloc(
-        ctx->file_name(),
+    cfd_->extent_storage()->UnlockExtent(
+        ctx->file_name().file_number_,
         commit && s.ok() ? ctx->cur_b_off() : ctx->base_b_off());
   }
   return s;

@@ -3086,46 +3086,6 @@ void DBImpl::BGWorkPurge(void* db) {
   TEST_SYNC_POINT("DBImpl::BGWorkPurge:end");
 }
 
-void DBImpl::BGWorkHeapGCJob(void* arg) {
-  // auto heap_free_arg =
-  // reinterpret_cast<heapkv::CFHeapStorage::HeapGCArg*>(arg); auto
-  // extent_manager = heap_free_arg->storage_->extent_manager(); if
-  // (heap_free_arg->job_) {
-  //   extent_manager->SubmitGarbage(heap_free_arg->job_->garbage_);
-  // }
-
-  // while (extent_manager->NeedScheduleGC() &&
-  //        !heap_free_arg->shutting_down_->load(std::memory_order_acquire)) {
-  //   auto j = heap_free_arg->storage_->NewGCJob(false);
-  //   if (!j) {
-  //     break;
-  //   }
-  //   Status s = j->Run();
-  //   if (!s.ok()) {
-  //     // log error
-  //     ROCKS_LOG_ERROR(heap_free_arg->cfd_->ioptions()->info_log,
-  //                     "Failed to execute heap free job: %s",
-  //                     s.ToString().c_str());
-  //   }
-  // }
-  // if (heap_free_arg->force_gc_) {
-  //   // TODO(wnj): force gc all garbage
-  //   Status s = heap_free_arg->storage_->NewGCJob(true)->Run();
-  //   if (!s.ok()) {
-  //     // log error
-  //     ROCKS_LOG_ERROR(heap_free_arg->cfd_->ioptions()->info_log,
-  //                     "Failed to execute heap free job: %s",
-  //                     s.ToString().c_str());
-  //   }
-  // }
-
-  // heap_free_arg->db_->mutex_.Lock();
-  // heap_free_arg->db_->bg_heap_gc_scheduled_--;
-  // heap_free_arg->db_->bg_cv_.SignalAll();
-  // heap_free_arg->db_->mutex_.Unlock();
-  // delete heap_free_arg;
-}
-
 void DBImpl::UnscheduleCompactionCallback(void* arg) {
   CompactionArg* ca_ptr = reinterpret_cast<CompactionArg*>(arg);
   Env::Priority compaction_pri = ca_ptr->compaction_pri_;

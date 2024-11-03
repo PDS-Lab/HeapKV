@@ -110,19 +110,23 @@ Status ExtentFile::ReadValueIndex(UringIoEngine* io_engine, void* buf) {
   return Status::OK();
 }
 
-Status ExtentFile::UpdateAferAlloc(UringIoEngine* io_engine, ExtentMeta* meta,
-                                   uint32_t base_alloc_block_off,
-                                   const ExtentValueIndex& index_block,
-                                   void* buffer) {
+Status ExtentFile::UpdateValueIndex(UringIoEngine* io_engine, ExtentMeta* meta,
+                                    const ExtentValueIndex& index_block,
+                                    void* buffer) {
   // 1. encode
   size_t n = kBlockSize + CalcValueIndexSize(index_block);
   memset(buffer, 0, n);
   char* cursor = static_cast<char*>(buffer) + kBlockSize;
   size_t block_inuse = 0;
+  uint32_t base_alloc_block_off = 0;
   for (auto va : index_block) {
     va.EncodeTo(cursor);
     cursor += sizeof(ValueAddr);
-    block_inuse += va.b_cnt();
+    if (va.has_value()) {
+      block_inuse += va.b_cnt();
+      base_alloc_block_off =
+          std::max(base_alloc_block_off, uint32_t(va.b_off() + va.b_cnt()));
+    }
   }
   uint32_t value_index_checksum = Lower32of64(
       XXH3_64bits(static_cast<char*>(buffer) + kBlockSize, n - kBlockSize));
@@ -144,7 +148,14 @@ Status ExtentFile::UpdateAferAlloc(UringIoEngine* io_engine, ExtentMeta* meta,
           "write meta and value index failed: " + file_name_.ToString(),
           strerror(-f->Result()));
     }
-    file_size_ = kExtentDataSize + n;
+    size_t new_file_size = kExtentDataSize + n;
+    if (new_file_size < file_size_) {
+      if (ftruncate64(fd_, file_size_) != 0) {
+        return Status::IOError("ftruncate64 failed: " + file_name_.ToString(),
+                               strerror(-f->Result()));
+      }
+    }
+    file_size_ = new_file_size;
   }
   // 3. update meta
   ExtentMeta::MetaInfo mi;

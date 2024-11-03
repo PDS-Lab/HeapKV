@@ -124,6 +124,7 @@ class ExtentStorage {
   using SortSet = std::set<ExtentSpace, ExtentComp>;
   const ColumnFamilyData* cfd_;
   const std::string db_name_;
+  const std::string base_extent_file_dir_;
   CacheKey hv_cache_key_;
   CacheKey vi_cache_key_;
   std::shared_ptr<Cache> heap_value_cache_;
@@ -141,6 +142,7 @@ class ExtentStorage {
   ExtentStorage(std::string_view db_name, ColumnFamilyData* cfd)
       : cfd_(cfd),
         db_name_(db_name),
+        base_extent_file_dir_(std::string(db_name) + "/heapkv/"),
         heap_value_cache_(cfd->ioptions()->heap_value_cache) {
     if (heap_value_cache_) {
       hv_cache_key_ =
@@ -151,6 +153,9 @@ class ExtentStorage {
   }
 
   const std::string& db_name() const { return db_name_; }
+  const std::string& base_extent_file_dir() const {
+    return base_extent_file_dir_;
+  }
   ExtentMeta* GetExtentMeta(uint32_t file_number);
   Status GetValueAddr(UringIoEngine* io_engine, ExtentMeta* meta,
                       uint32_t value_index, std::shared_ptr<ExtentFile>* file,
@@ -165,15 +170,16 @@ class ExtentStorage {
   auto GetValueIndexBlock(UringIoEngine* io_engine, ExtentMeta* meta,
                           std::shared_ptr<ExtentFile>* file,
                           PinnableSlice* value_index_block) -> Status;
+  void UnlockExtent(uint32_t file_number, uint32_t alloc_off);
   // alloc things
   auto GetExtentForAlloc(ExtentMeta** meta, uint16_t min_free_block) -> Status;
-  void FreeExtentAfterAlloc(ExtentFileName file_name, uint32_t alloc_off);
   void EvictValueIndexCache(ExtentFileName file_name);
   // garbage collect
+  bool LockExtentForGc(uint32_t file_number);
 
  private:
   bool ExtentCanAlloc(uint32_t alloc_off) const {
-    return kBlockSize * (kExtentBlockNum - alloc_off) >= (1 << 20);
+    return kBlockSize * (kExtentBlockNum - alloc_off) >= (2 << 20);
   }
 };
 

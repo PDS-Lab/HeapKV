@@ -66,6 +66,7 @@ struct UringIoOptions {
   UringIoOptions() = default;
   UringIoOptions(uint32_t flags) : flags_(flags) {}
   bool FixedFile() const { return flags_ & IOSQE_FIXED_FILE; }
+  bool LinkedReq() const { return flags_ & IOSQE_IO_LINK; }
 };
 
 // a thread unsafe io engine

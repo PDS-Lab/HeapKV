@@ -53,8 +53,9 @@ auto HeapGarbageCollector::FinalizeDropResult() -> CompactionHeapGarbage {
   return std::move(garbage_);
 }
 
-void HeapGarbageCollector::MergeGarbage(CompactionHeapGarbage* base,
-                                        CompactionHeapGarbage* merge_to_base) {
+void MergeGarbage(CompactionHeapGarbage* base,
+                  CompactionHeapGarbage* merge_to_base, uint32_t threshold,
+                  std::unordered_set<uint32_t>* might_gc) {
   if (merge_to_base->empty()) {
     return;
   }
@@ -67,7 +68,13 @@ void HeapGarbageCollector::MergeGarbage(CompactionHeapGarbage* base,
       it->second.value_index_list_.insert(it->second.value_index_list_.end(),
                                           g.value_index_list_.begin(),
                                           g.value_index_list_.end());
+      if (might_gc != nullptr && it->second.b_cnt_ >= threshold) {
+        might_gc->insert(fn);
+      }
     } else {
+      if (might_gc != nullptr && g.b_cnt_ >= threshold) {
+        might_gc->insert(fn);
+      }
       base->emplace(fn, std::move(g));
     }
   }
