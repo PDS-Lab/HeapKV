@@ -20,8 +20,7 @@ struct ExtentGarbage {
 using CompactionHeapGarbage = std::unordered_map<uint32_t, ExtentGarbage>;
 
 void MergeGarbage(CompactionHeapGarbage* base,
-                  CompactionHeapGarbage* merge_to_base, uint32_t threshold = 0,
-                  std::unordered_set<uint32_t>* might_gc = nullptr);
+                  CompactionHeapGarbage* merge_to_base);
 // A class co-work with compaction process to collect dropped HeapValueIndex
 class HeapGarbageCollector {
  private:

@@ -47,11 +47,11 @@ auto UringIoEngine::NewUringIoEngine() -> std::unique_ptr<UringIoEngine> {
   auto engine = std::make_unique<UringIoEngine>();
   io_uring_params params;
   memset(&params, 0, sizeof(params));
-  params.flags = IORING_SETUP_SQPOLL | IORING_SETUP_ATTACH_WQ;
-  params.sq_thread_idle = 50;
-  params.wq_fd = UniqueWqFd();
-  // params.flags = IORING_SETUP_COOP_TASKRUN | IORING_SETUP_SINGLE_ISSUER |
-  //  IORING_SETUP_TASKRUN_FLAG | IORING_SETUP_DEFER_TASKRUN;
+  // params.flags = IORING_SETUP_SQPOLL | IORING_SETUP_ATTACH_WQ;
+  // params.sq_thread_idle = 50;
+  // params.wq_fd = UniqueWqFd();
+  params.flags = IORING_SETUP_COOP_TASKRUN | IORING_SETUP_SINGLE_ISSUER |
+                 IORING_SETUP_TASKRUN_FLAG | IORING_SETUP_DEFER_TASKRUN;
   int ret = io_uring_queue_init_params(kRingDepth, &engine->ring_, &params);
   if (ret < 0) {
     std::cerr << "io_uring_queue_init failed: " << ret << " " << strerror(-ret)

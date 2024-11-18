@@ -179,7 +179,10 @@ class ExtentStorage {
 
  private:
   bool ExtentCanAlloc(uint32_t alloc_off) const {
-    return kBlockSize * (kExtentBlockNum - alloc_off) >= (2 << 20);
+    return kExtentBlockNum - alloc_off >
+           (kExtentBlockNum *
+            cfd_->ioptions()->heap_extent_relocate_threshold) /
+               2;
   }
 };
 

@@ -54,10 +54,15 @@ void HeapJobCenter::NotifyFileDeletion(uint64_t file_number) {
     }
     pending_garbage_map_.erase(it);
   }
-  constexpr uint32_t might_gc_threshold = (1 << 20) / kBlockSize;
   if (to_gc != nullptr) {
-    MergeGarbage(&can_gc_, to_gc.get(), might_gc_threshold,
-                 &might_schedule_gc_);
+    MergeGarbage(&can_gc_, to_gc.get());
+    for (auto& [fn, _] : *to_gc) {
+      auto mi = cfd_->extent_storage()->GetExtentMeta(fn)->meta();
+      if (kExtentBlockNum - mi.inuse_block_num_ + can_gc_[fn].b_cnt_ >
+          kExtentBlockNum * cfd_->ioptions()->heap_extent_relocate_threshold) {
+        might_schedule_gc_.insert(fn);
+      }
+    }
   }
 }
 
@@ -84,25 +89,34 @@ void HeapJobCenter::WaitJobDone(uint64_t jid) {
 
 void HeapJobCenter::MaybeScheduleGc(std::unique_ptr<HeapGcJob>* job) {
   std::lock_guard<std::mutex> g(mu_);
-  for (auto file_number : might_schedule_gc_) {
-    auto it = can_gc_.find(file_number);
-    if (it == can_gc_.end()) {
+  if (job == nullptr &&
+      int(bg_running_gc_) >=
+          std::max(1, cfd_->ioptions()->env->GetBackgroundThreads() - 1)) {
+    return;
+  }
+  for (auto it = might_schedule_gc_.begin(); it != might_schedule_gc_.end();) {
+    uint32_t file_number = *it;
+    auto can_gc_it = can_gc_.find(file_number);
+    if (can_gc_it == can_gc_.end()) {
+      it = might_schedule_gc_.erase(it);
       continue;
     }
     auto extent_storage = cfd_->extent_storage();
     auto mi = extent_storage->GetExtentMeta(file_number)->meta();
-    uint32_t garbage_blk =
-        mi.base_alloc_block_off_ - mi.inuse_block_num_ + it->second.b_cnt_;
+    uint32_t garbage_blk = mi.base_alloc_block_off_ - mi.inuse_block_num_ +
+                           can_gc_it->second.b_cnt_;
     if (garbage_blk <
         kExtentBlockNum * cfd_->ioptions()->heap_extent_relocate_threshold) {
+      it = might_schedule_gc_.erase(it);
       continue;
     }
     if (!extent_storage->LockExtentForGc(file_number)) {
+      it++;
       continue;
     }
-    ExtentGarbage job_garbage = std::move(it->second);
-    can_gc_.erase(it);
-    might_schedule_gc_.erase(file_number);
+    ExtentGarbage job_garbage = std::move(can_gc_it->second);
+    can_gc_.erase(can_gc_it);
+    might_schedule_gc_.erase(it);
     uint64_t jid = next_job_id_.fetch_add(1, std::memory_order_relaxed);
     auto j = std::make_unique<HeapGcJob>(jid, cfd_, file_number,
                                          std::move(job_garbage));

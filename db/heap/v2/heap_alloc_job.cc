@@ -14,8 +14,10 @@
 #include "db/heap/v2/extent.h"
 #include "db/heap/v2/extent_storage.h"
 #include "db/heap/v2/heap_job_center.h"
+#include "monitoring/statistics_impl.h"
 #include "rocksdb/compression_type.h"
 #include "rocksdb/slice.h"
+#include "rocksdb/statistics.h"
 #include "rocksdb/status.h"
 #include "util/xxhash.h"
 
@@ -158,6 +160,9 @@ Status HeapAllocJob::Finish(bool commit) {
           break;
         }
         cfd_->extent_storage()->EvictValueIndexCache(ctx->file_name());
+        RecordTick(
+            cfd_->ioptions()->statistics.get(), HEAPKV_ALLOC_JOB_BYTES_WRITE,
+            kBlockSize + ExtentFile::CalcValueIndexSize(ctx->value_index()));
       }
     }
   }
@@ -233,6 +238,8 @@ Status HeapAllocJob::SubmitCurrentBuffer() {
           strerror(-f->Result()));
     }
   }
+  RecordTick(cfd_->ioptions()->statistics.get(), HEAPKV_ALLOC_JOB_BYTES_WRITE,
+             cursor_);
   commit_count_++;
   cursor_ = 0;
   return Status::OK();

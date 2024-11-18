@@ -27,11 +27,27 @@ struct GcCost {
 };
 
 struct Chunk {
-  bool is_empty_{true};
-  size_t b_off_{0};
-  size_t b_cnt_{0};
-  size_t vd_num_{0};
-  size_t off_in_vds_{0};
+  uint32_t b_off_{0};
+  uint32_t b_cnt_{0};
+  uint32_t fill_cnt_{0};
+  uint32_t f_index{0};
+  char* buffer_{nullptr};
+  std::vector<uint32_t> fill_vd_index_{};
+  Chunk() {}
+  ~Chunk() {
+    if (buffer_ != nullptr) free(buffer_);
+  }
+};
+
+struct __attribute__((packed)) FillOp {
+  uint32_t off_in_vds_;
+  uint16_t to_off_;
+};
+
+struct MoveOp {
+  uint16_t from_off_{0};
+  uint16_t to_off_{0};
+  uint16_t b_cnt_{0};
 };
 
 class HeapGcJob {
@@ -46,9 +62,26 @@ class HeapGcJob {
   uint32_t inuse_block_num_{0};
   std::shared_ptr<ExtentFile> ori_file_;
   std::vector<ValueDescriptor> vds_;
-  std::vector<Chunk> chunk_list_;
+  std::vector<Chunk> empty_chunk_list_;
+  std::vector<FillOp> fill_op_list_;
+  std::vector<MoveOp> move_op_list_;
   int new_fd_{-1};
   std::string tmp_path_;
+  uint64_t bytes_read_{0};
+  uint64_t bytes_write_{0};
+
+ private:
+  static constexpr size_t BUF_SIZE = 128 * 1024;
+  using BUF = char[BUF_SIZE];  // 128k
+  static constexpr size_t MAX_MOVE_BLOCKS_PER_IO = BUF_SIZE / kBlockSize;
+  static constexpr size_t MAX_DEPTH = 16;
+  BUF* buffers_{nullptr};
+  struct RWPair {
+    std::unique_ptr<UringCmdFuture> read{nullptr};
+    std::unique_ptr<UringCmdFuture> write{nullptr};
+    size_t read_offset_;
+  };
+  std::array<RWPair, MAX_DEPTH> inflight_;
 
  public:
   HeapGcJob(const uint64_t job_id, const ColumnFamilyData* cfd,
@@ -65,11 +98,13 @@ class HeapGcJob {
   Status ReadOriginValueIndex();
   void RemoveGarbage();
   void SortAndRemoveEmpty();
-  void BuildChunkList();
-  GcCost AnalyzeNaiveRelocate();
+  void BuildEmptyChunkList();
+  Status PrepareBuffer();
+  Status WaitIo(size_t index, bool read);
+  // GcCost AnalyzeNaiveRelocate();
   GcCost AnalyzeFillEmptyRelocate();
   Status RunNaiveRelocate();
-  // Status RunFillEmptyRelocate();
+  Status RunFillEmptyRelocate();
   Status FinalizeRelocate();
   Status DoValueIndexUpdateOnly();
 };

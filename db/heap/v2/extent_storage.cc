@@ -107,7 +107,9 @@ Status ExtentStorage::OpenStorage(std::string_view db_name,
     auto rf = h.file->ReadMetaAsync(io_engine, buf);
     h.f.swap(rf);
   }
-  for (size_t i = concurrency * (async_handle.size() / concurrency);
+  for (size_t i = async_handle.size() > concurrency
+                      ? async_handle.size() - concurrency
+                      : 0;
        i < async_handle.size(); i++) {
     char* buf = buffer_pool + kBlockSize * (i % concurrency);
     if (Status s = init_meta(i, buf); !s.ok()) {

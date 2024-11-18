@@ -54,8 +54,7 @@ auto HeapGarbageCollector::FinalizeDropResult() -> CompactionHeapGarbage {
 }
 
 void MergeGarbage(CompactionHeapGarbage* base,
-                  CompactionHeapGarbage* merge_to_base, uint32_t threshold,
-                  std::unordered_set<uint32_t>* might_gc) {
+                  CompactionHeapGarbage* merge_to_base) {
   if (merge_to_base->empty()) {
     return;
   }
@@ -68,17 +67,10 @@ void MergeGarbage(CompactionHeapGarbage* base,
       it->second.value_index_list_.insert(it->second.value_index_list_.end(),
                                           g.value_index_list_.begin(),
                                           g.value_index_list_.end());
-      if (might_gc != nullptr && it->second.b_cnt_ >= threshold) {
-        might_gc->insert(fn);
-      }
     } else {
-      if (might_gc != nullptr && g.b_cnt_ >= threshold) {
-        might_gc->insert(fn);
-      }
       base->emplace(fn, std::move(g));
     }
   }
-  merge_to_base->clear();
 }
 
 }  // namespace HEAPKV_NS_V2
