@@ -3,6 +3,7 @@
 #include <sys/types.h>
 #include <unistd.h>
 
+#include <atomic>
 #include <cassert>
 #include <cstddef>
 #include <cstdint>
@@ -164,6 +165,7 @@ class ExtentMeta {
   mutable std::shared_mutex meta_mu_;
   std::shared_ptr<ExtentFile> file_;  // protect by atomic access
   MetaInfo meta_;
+  std::atomic_uint32_t file_epoch_hint_;
 
  public:
   [[nodiscard]] std::unique_lock<std::shared_mutex> lock_vi() {
@@ -176,6 +178,9 @@ class ExtentMeta {
     std::shared_lock<std::shared_mutex> g(meta_mu_);
     return file_;
   }
+  uint32_t read_epoch_unsafe() const {
+    return file_epoch_hint_.load(std::memory_order_relaxed);
+  }
   MetaInfo meta() const {
     std::shared_lock<std::shared_mutex> g(meta_mu_);
     return meta_;
@@ -187,6 +192,7 @@ class ExtentMeta {
     meta_.base_alloc_block_off_ = 0;
     meta_.value_index_checksum_ = 0;
     meta_.inuse_block_num_ = 0;
+    file_epoch_hint_.store(meta_.fn_.file_epoch_, std::memory_order_relaxed);
     file_ = std::move(f);
   }
   void InitFromExist(std::unique_ptr<ExtentFile> f, char* buf) {
@@ -200,16 +206,19 @@ class ExtentMeta {
     buf += 4;
     meta_.inuse_block_num_ = DecodeFixed32(buf);
     file_ = std::move(f);
+    file_epoch_hint_.store(meta_.fn_.file_epoch_, std::memory_order_relaxed);
   }
   void UpdateMeta(MetaInfo meta) {
     std::lock_guard<std::shared_mutex> g(meta_mu_);
     meta_ = meta;
+    file_epoch_hint_.store(meta_.fn_.file_epoch_, std::memory_order_relaxed);
   }
   void UpdateMetaAndFile(MetaInfo meta, std::unique_ptr<ExtentFile> new_file) {
     auto vig = lock_vi();
     std::shared_lock<std::shared_mutex> g(meta_mu_);
     meta_ = meta;
     file_ = std::move(new_file);
+    file_epoch_hint_.store(meta_.fn_.file_epoch_, std::memory_order_relaxed);
   }
 };
 

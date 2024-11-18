@@ -151,7 +151,7 @@ class ExtentStorage {
           CacheKey::CreateUniqueForCacheLifetime(heap_value_cache_.get());
     }
   }
-
+  const ColumnFamilyData* cfd() const { return cfd_; }
   const std::string& db_name() const { return db_name_; }
   const std::string& base_extent_file_dir() const {
     return base_extent_file_dir_;
@@ -159,7 +159,7 @@ class ExtentStorage {
   ExtentMeta* GetExtentMeta(uint32_t file_number);
   Status GetValueAddr(UringIoEngine* io_engine, ExtentMeta* meta,
                       uint32_t value_index, std::shared_ptr<ExtentFile>* file,
-                      ValueAddr* value_addr);
+                      ValueAddr* value_addr, size_t* issue_io);
   // fetch value
   auto GetHeapValueAsync(const ReadOptions& ro, UringIoEngine* io_engine,
                          const HeapValueIndex& hvi) -> HeapValueGetContext;
@@ -169,7 +169,8 @@ class ExtentStorage {
                     PinnableSlice* value) -> Status;
   auto GetValueIndexBlock(UringIoEngine* io_engine, ExtentMeta* meta,
                           std::shared_ptr<ExtentFile>* file,
-                          PinnableSlice* value_index_block) -> Status;
+                          PinnableSlice* value_index_block,
+                          size_t* issue_io) -> Status;
   void UnlockExtent(uint32_t file_number, uint32_t alloc_off);
   // alloc things
   auto GetExtentForAlloc(ExtentMeta** meta, uint16_t min_free_block) -> Status;

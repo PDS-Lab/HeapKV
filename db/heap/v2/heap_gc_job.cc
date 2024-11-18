@@ -53,11 +53,13 @@ Status HeapGcJob::InitJob() {
 
 Status HeapGcJob::ReadOriginValueIndex() {
   PinnableSlice value_index_block;
+  size_t issue_io = 0;
   Status s = cfd_->extent_storage()->GetValueIndexBlock(
-      io_engine_, meta_, &ori_file_, &value_index_block);
+      io_engine_, meta_, &ori_file_, &value_index_block, &issue_io);
   if (!s.ok()) {
     return s;
   }
+  bytes_read_ += issue_io;
   size_t n = value_index_block.size() / sizeof(ValueAddr);
   vds_.reserve(n);
   const char* cur = value_index_block.data();

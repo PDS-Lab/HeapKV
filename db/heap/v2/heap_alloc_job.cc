@@ -46,10 +46,15 @@ Status ExtentAllocCtx::FromMeta(UringIoEngine* io_engine,
                                 std::unique_ptr<ExtentAllocCtx>* ctx) {
   PinnableSlice value_index_block;
   auto file = meta->file();
-  Status s =
-      storage->GetValueIndexBlock(io_engine, meta, &file, &value_index_block);
+  size_t issue_io = 0;
+  Status s = storage->GetValueIndexBlock(io_engine, meta, &file,
+                                         &value_index_block, &issue_io);
   if (!s.ok()) {
     return s;
+  }
+  if (issue_io > 0) {
+    RecordTick(storage->cfd()->ioptions()->statistics.get(),
+               HEAPKV_ALLOC_JOB_BYTES_READ, issue_io);
   }
   auto mi = meta->meta();
   *ctx = std::make_unique<ExtentAllocCtx>(

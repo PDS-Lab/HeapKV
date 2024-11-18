@@ -5,6 +5,8 @@
 
 #include "db/compaction/compaction_iterator.h"
 
+#include <cstddef>
+#include <cstdint>
 #include <iterator>
 #include <limits>
 
@@ -21,8 +23,10 @@
 #include "db/wide/wide_column_serialization.h"
 #include "db/wide/wide_columns_helper.h"
 #include "logging/logging.h"
+#include "monitoring/statistics_impl.h"
 #include "port/likely.h"
 #include "rocksdb/listener.h"
+#include "rocksdb/statistics.h"
 #include "table/internal_iterator.h"
 #include "test_util/sync_point.h"
 
@@ -1253,27 +1257,25 @@ bool CompactionIterator::ReplaceValueAddrIfNeeded() {
     return true;
   }
   auto hvi = heapkv::v2::HeapValueIndex::DecodeFrom(value_);
-  auto it = extent_file_epoch_cache_.find(hvi.extent_.file_number_);
-  if (it != extent_file_epoch_cache_.end() &&
-      hvi.extent_.file_epoch_ == it->second) {
-    return true;
-  }
   auto meta = cfd->extent_storage()->GetExtentMeta(hvi.extent_.file_number_);
-  auto file = meta->file();
-  auto file_name = file->file_name();
-  extent_file_epoch_cache_[file_name.file_number_] = file_name.file_epoch_;
-  if (hvi.extent_.file_epoch_ == file_name.file_epoch_) {
+  uint32_t epoch = meta->read_epoch_unsafe();
+  if (epoch == hvi.extent_.file_epoch_) {
     return true;
   }
+  auto file = meta->file();
   heapkv::v2::ValueAddr va;
+  size_t issue_io = 0;
   Status s = cfd->extent_storage()->GetValueAddr(
-      heapkv::GetThreadLocalIoEngine(), meta, hvi.value_index_, &file, &va);
+      heapkv::GetThreadLocalIoEngine(), meta, hvi.value_index_, &file, &va,
+      &issue_io);
   if (!s.ok()) {
     return false;
   }
-  file_name = file->file_name();
-  extent_file_epoch_cache_[file_name.file_number_] = file_name.file_epoch_;
-  hvi.extent_.file_epoch_ = file_name.file_epoch_;
+  if (issue_io > 0) {
+    RecordTick(cfd->ioptions()->statistics.get(), HEAPKV_FREE_JOB_BYTES_READ,
+               issue_io);
+  }
+  hvi.extent_.file_epoch_ = file->file_name().file_epoch_;
   hvi.value_addr_ = va;
   heap_value_index_.clear();
   hvi.EncodeTo(&heap_value_index_);

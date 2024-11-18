@@ -479,7 +479,6 @@ class CompactionIterator {
 
   std::string blob_index_;
   std::string heap_value_index_;
-  std::unordered_map<uint32_t, uint32_t> extent_file_epoch_cache_;
   PinnableSlice blob_value_;
   std::string compaction_filter_value_;
   InternalKey compaction_filter_skip_until_;

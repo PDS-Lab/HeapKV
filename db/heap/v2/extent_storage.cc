@@ -16,6 +16,7 @@
 #include "db/heap/v2/extent.h"
 #include "logging/logging.h"
 #include "memory/memory_allocator_impl.h"
+#include "monitoring/statistics_impl.h"
 #include "rocksdb/slice.h"
 #include "rocksdb/status.h"
 #include "util/hash.h"
@@ -34,8 +35,7 @@ ExtentMeta* ExtentStorage::GetExtentMeta(uint32_t file_number) {
       list = l;
     }
   }
-  return &list->at(file_number -
-                   i1 * (sizeof(ExtentList) / sizeof(ExtentMeta)));
+  return &(*list)[file_number - i1 * (sizeof(ExtentList) / sizeof(ExtentMeta))];
 };
 
 Status ExtentStorage::OpenStorage(std::string_view db_name,
@@ -128,9 +128,9 @@ Status ExtentStorage::OpenStorage(std::string_view db_name,
 Status ExtentStorage::GetValueAddr(UringIoEngine* io_engine, ExtentMeta* meta,
                                    uint32_t value_index,
                                    std::shared_ptr<ExtentFile>* file,
-                                   ValueAddr* value_addr) {
+                                   ValueAddr* value_addr, size_t* issue_io) {
   PinnableSlice index;
-  Status s = GetValueIndexBlock(io_engine, meta, file, &index);
+  Status s = GetValueIndexBlock(io_engine, meta, file, &index, issue_io);
   if (!s.ok()) {
     return s;
   }
@@ -167,10 +167,11 @@ auto ExtentStorage::GetHeapValueAsync(
   ValueAddr va = hvi.value_addr_;
   ExtentMeta* meta = GetExtentMeta(hvi.extent_.file_number_);
   std::shared_ptr<ExtentFile> file = meta->file();
+  size_t issue_io = 0;
   if (hvi.extent_.file_epoch_ != file->file_name().file_epoch_) {
     // ultra slow path
     // gc happened, we need to fetch new value addr through value index
-    s = GetValueAddr(io_engine, meta, hvi.value_index_, &file, &va);
+    s = GetValueAddr(io_engine, meta, hvi.value_index_, &file, &va, &issue_io);
   }
   if (!s.ok()) {
     return HeapValueGetContext(s, hvi, nullptr, nullptr, {nullptr, std::free});
@@ -211,6 +212,8 @@ auto ExtentStorage::WaitAsyncGet(const ReadOptions& ro, HeapValueGetContext ctx,
                         strerror(-ctx.future_->Result()));
     return s;
   }
+  RecordTick(cfd_->ioptions()->statistics.get(), HEAPKV_USER_BYTES_READ,
+             ctx.future_->Result());
   if (ro.verify_checksums) {
     // verify checksum
     uint32_t checksum = Lower32of64(
@@ -260,10 +263,11 @@ auto ExtentStorage::WaitAsyncGet(const ReadOptions& ro, HeapValueGetContext ctx,
   return s;
 }
 
-auto ExtentStorage::GetValueIndexBlock(
-    UringIoEngine* io_engine, ExtentMeta* meta,
-    std::shared_ptr<ExtentFile>* file,
-    PinnableSlice* value_index_block) -> Status {
+auto ExtentStorage::GetValueIndexBlock(UringIoEngine* io_engine,
+                                       ExtentMeta* meta,
+                                       std::shared_ptr<ExtentFile>* file,
+                                       PinnableSlice* value_index_block,
+                                       size_t* issue_io) -> Status {
   Status s;
   ValueIndexCacheKey key(vi_cache_key_, (*file)->file_name());
   if (heap_value_cache_) {
@@ -291,6 +295,9 @@ auto ExtentStorage::GetValueIndexBlock(
   size_t n = f->value_index_size();
   if (n == 0) {  // empty file
     return s;
+  }
+  if (issue_io != nullptr) {
+    *issue_io = n;
   }
   void* ptr = std::aligned_alloc(kBlockSize, n);
   if (ptr == nullptr) {
