@@ -117,9 +117,11 @@ struct formatter<HEAPKV_NS_V2::GcCost> {
   constexpr auto parse(std::format_parse_context& ctx) { return ctx.begin(); }
   auto format(const HEAPKV_NS_V2::GcCost& cost,
               std::format_context& ctx) const {
-    return format_to(ctx.out(),
-                     "GcCost{{ io_cnt_ = {}, data_move_bytes_ = {} }}",
-                     cost.io_cnt_, cost.data_move_bytes_);
+    return format_to(
+        ctx.out(),
+        "GcCost{{ io_cnt_ = {}, data_move_bytes_ = {}, avg_io_size = {} }}",
+        cost.io_cnt_, cost.data_move_bytes_,
+        cost.io_cnt_ == 0 ? 0 : cost.data_move_bytes_ / cost.io_cnt_);
   }
 };
 

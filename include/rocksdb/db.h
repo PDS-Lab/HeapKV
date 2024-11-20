@@ -1542,6 +1542,8 @@ class DB {
   virtual Status WaitForCompact(
       const WaitForCompactOptions& /* wait_for_compact_options */) = 0;
 
+  virtual Status WaitForHeapGc() { return Status::NotSupported(); }
+
   // Number of levels used for this DB.
   virtual int NumberLevels(ColumnFamilyHandle* column_family) = 0;
   virtual int NumberLevels() { return NumberLevels(DefaultColumnFamily()); }

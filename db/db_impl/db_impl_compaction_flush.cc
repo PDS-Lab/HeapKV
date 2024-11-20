@@ -15,6 +15,7 @@
 #include "db/db_impl/db_impl.h"
 #include "db/error_handler.h"
 #include "db/event_helpers.h"
+#include "db/heap/v2/heap_job_center.h"
 #include "file/sst_file_manager_impl.h"
 #include "logging/logging.h"
 #include "monitoring/iostats_context_imp.h"
@@ -24,6 +25,7 @@
 #include "rocksdb/file_system.h"
 #include "rocksdb/io_status.h"
 #include "rocksdb/options.h"
+#include "rocksdb/status.h"
 #include "rocksdb/table.h"
 #include "test_util/sync_point.h"
 #include "util/cast_util.h"
@@ -3812,8 +3814,7 @@ Status DBImpl::BackgroundCompaction(bool* made_progress,
                                                              moved_bytes);
     {
       event_logger_.LogToBuffer(log_buffer)
-          << "job" << job_context->job_id << "event"
-          << "trivial_move"
+          << "job" << job_context->job_id << "event" << "trivial_move"
           << "destination_level" << c->output_level() << "files" << moved_files
           << "total_files_size" << moved_bytes;
     }
@@ -4366,6 +4367,33 @@ Status DBImpl::WaitForCompact(
       return error_handler_.GetBGError();
     }
   }
+}
+
+Status DBImpl::WaitForHeapGc() {
+  Status s;
+  WaitForCompactOptions wo;
+  wo.flush = true;
+  s = WaitForCompact(wo);
+  if (!s.ok()) {
+    return s;
+  }
+
+  autovector<heapkv::v2::HeapJobCenter*> jcs;
+  {
+    InstrumentedMutexLock l(&mutex_);
+    for (auto cfd : *versions_->GetColumnFamilySet()) {
+      if (cfd->heap_job_center()) {
+        jcs.push_back(cfd->heap_job_center());
+      }
+    }
+  }
+  for (auto jc : jcs) {
+    jc->PurgeAllGarbage();
+  }
+  for (auto jc : jcs) {
+    jc->WaitJobDone();
+  }
+  return s;
 }
 
 }  // namespace ROCKSDB_NAMESPACE

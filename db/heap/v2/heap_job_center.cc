@@ -94,6 +94,9 @@ void HeapJobCenter::MaybeScheduleGc(std::unique_ptr<HeapGcJob>* job) {
           std::max(1, cfd_->ioptions()->env->GetBackgroundThreads() - 1)) {
     return;
   }
+  if (pending_purge_) {
+    return;
+  }
   for (auto it = might_schedule_gc_.begin(); it != might_schedule_gc_.end();) {
     uint32_t file_number = *it;
     auto can_gc_it = can_gc_.find(file_number);
@@ -136,6 +139,10 @@ void HeapJobCenter::MaybeScheduleGc(std::unique_ptr<HeapGcJob>* job) {
 }
 
 void HeapJobCenter::PurgeAllGarbage() {
+  {
+    std::lock_guard<std::mutex> g(mu_);
+    pending_purge_ = true;
+  }
   WaitJobDone();
   std::lock_guard<std::mutex> g(mu_);
   might_schedule_gc_.clear();
@@ -158,6 +165,7 @@ void HeapJobCenter::PurgeAllGarbage() {
     cfd_->ioptions()->env->Schedule(&HeapJobCenter::BGRunPurgeJob, arg);
   }
   can_gc_.clear();
+  pending_purge_ = false;
 }
 
 void HeapJobCenter::BGRunGcJob(void* _arg) {

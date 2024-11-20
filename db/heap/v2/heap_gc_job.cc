@@ -74,9 +74,11 @@ Status HeapGcJob::ReadOriginValueIndex() {
 }
 
 void HeapGcJob::RemoveGarbage() {
-  for (auto g : garbage_.value_index_list_) {
-    inuse_block_num_ -= vds_[g].b_cnt();
-    vds_[g].reset();
+  for (auto& g : garbage_.value_index_list_) {
+    for (auto idx : g) {
+      inuse_block_num_ -= vds_[idx].b_cnt();
+      vds_[idx].reset();
+    }
   }
 }
 
@@ -202,23 +204,25 @@ GcCost HeapGcJob::AnalyzeFillEmptyRelocate() {
 
 Status HeapGcJob::Run() {
   Status s;
+  auto start = std::chrono::steady_clock::now();
   if (s = ReadOriginValueIndex(); !s.ok()) {
     return s;
   }
   RemoveGarbage();
   SortAndRemoveEmpty();
+  GcCost naive;
+  GcCost fill_empty;
   if (kExtentBlockNum - inuse_block_num_ <
       kExtentBlockNum * cfd_->ioptions()->heap_extent_relocate_threshold) {
     // dont need relocate
     s = DoValueIndexUpdateOnly();
   } else {
     // need relocate
-    auto start = std::chrono::steady_clock::now();
     BuildEmptyChunkList();
-    GcCost naive{kExtentDataSize / BUF_SIZE, kExtentDataSize};
-    GcCost fill_empty = AnalyzeFillEmptyRelocate();
+    naive = GcCost{kExtentDataSize / BUF_SIZE, kExtentDataSize};
+    fill_empty = AnalyzeFillEmptyRelocate();
     bool run_naive = fill_empty.data_move_bytes_ > naive.data_move_bytes_ ||
-                     fill_empty.io_cnt_ * 4096 > naive.data_move_bytes_;
+                     fill_empty.io_cnt_ * 8192 > naive.data_move_bytes_;
     if (run_naive) {
       s = PrepareBuffer();
       s = RunNaiveRelocate();
@@ -228,17 +232,18 @@ Status HeapGcJob::Run() {
     if (s.ok()) {
       s = FinalizeRelocate();
     }
-    auto end = std::chrono::steady_clock::now();
-    ROCKS_LOG_DEBUG(
-        cfd_->ioptions()->logger, "%s",
-        std::format(
-            "[HeapGcJob({})] Gc time cost: {}, status: {}, read: {}, "
-            "write: {}",
-            job_id_,
-            std::chrono::duration_cast<std::chrono::milliseconds>(end - start),
-            s.ToString(), bytes_read_, bytes_write_)
-            .c_str());
   }
+  auto end = std::chrono::steady_clock::now();
+  ROCKS_LOG_INFO(
+      cfd_->ioptions()->logger, "%s",
+      std::format(
+          "[HeapGcJob({})] Gc time cost: {}, status: {}, "
+          "read: {}, "
+          "write: {}, ana GcCost: {}",
+          job_id_,
+          std::chrono::duration_cast<std::chrono::milliseconds>(end - start),
+          s.ToString(), bytes_read_, bytes_write_, fill_empty)
+          .c_str());
   RecordTick(cfd_->ioptions()->statistics.get(), HEAPKV_FREE_JOB_BYTES_READ,
              bytes_read_);
   RecordTick(cfd_->ioptions()->statistics.get(), HEAPKV_FREE_JOB_BYTES_WRITE,

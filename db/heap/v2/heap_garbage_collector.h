@@ -14,7 +14,7 @@ namespace HEAPKV_NS_V2 {
 
 struct ExtentGarbage {
   uint16_t b_cnt_{0};
-  std::vector<uint32_t> value_index_list_;
+  std::vector<std::vector<uint32_t>> value_index_list_;
 };
 
 using CompactionHeapGarbage = std::unordered_map<uint32_t, ExtentGarbage>;

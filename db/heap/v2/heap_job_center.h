@@ -25,6 +25,7 @@ class HeapJobCenter {
  private:
   const ColumnFamilyData* cfd_;
   std::mutex mu_;
+  bool pending_purge_{false};
   std::condition_variable cv_;
   std::atomic_uint64_t next_job_id_{1};
   uint32_t bg_running_gc_{0};  // how many BGRunGcJob is running at bg

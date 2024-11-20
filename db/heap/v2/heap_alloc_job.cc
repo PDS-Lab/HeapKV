@@ -5,6 +5,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
+#include <format>
 #include <limits>
 #include <memory>
 #include <optional>
@@ -147,13 +148,14 @@ Status HeapAllocJob::Finish(bool commit) {
     // 1. prepare buffer
     size_t max_buf_size = 0;
     for (auto& ctx : locked_extents_) {
-      max_buf_size += std::max(
+      max_buf_size = std::max(
           max_buf_size,
           kBlockSize + ExtentFile::CalcValueIndexSize(ctx->value_index()));
     }
     void* buf = std::aligned_alloc(kBlockSize, max_buf_size);
     if (buf == nullptr) {
-      s = Status::MemoryLimit("no enough memory to write meta");
+      s = Status::MemoryLimit(
+          std::format("no enough memory to write meta {}", max_buf_size));
     }
     if (s.ok()) {
       auto g = finally([buf = buf]() { free(buf); });
