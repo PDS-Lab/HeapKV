@@ -414,6 +414,18 @@ Status HeapGcJob::RunFillEmptyRelocate() {
   if (!s.ok()) {
     return s;
   }
+  for (auto& chunk : empty_chunk_list_) {
+    size_t off = chunk.b_off_;
+    for (auto vd_index : chunk.fill_vd_index_) {
+      vds_[vd_index].b_off_ = off;
+      off += vds_[vd_index].b_cnt_;
+    }
+  }
+  uint32_t end_block = 0;
+  for (auto vd : vds_) {
+    end_block = std::max(end_block, uint32_t(vd.b_off_) + uint32_t(vd.b_cnt_));
+  }
+
   tmp_path_ = std::format("{}/heapkv/{}.tmp", cfd_->extent_storage()->db_name(),
                           job_id_);
   new_fd_ = open(tmp_path_.c_str(), O_RDWR | O_DIRECT | O_CREAT | O_EXCL, 0644);
@@ -421,20 +433,13 @@ Status HeapGcJob::RunFillEmptyRelocate() {
   arg.src_fd = ori_file_->fd();
   arg.src_offset = 0;
   arg.dest_offset = 0;
-  arg.src_length = align_up(kExtentDataSize, 4096);
+  arg.src_length = align_up(end_block * kBlockSize, 4096);
   int rc = ioctl(new_fd_, FICLONERANGE, &arg);
   if (rc == -1) {
     close(new_fd_);
     unlink(tmp_path_.c_str());
     return Status::IOError(
         std::format("failed to reflink copy file error:{}", strerror(errno)));
-  }
-  for (auto& chunk : empty_chunk_list_) {
-    size_t off = chunk.b_off_;
-    for (auto vd_index : chunk.fill_vd_index_) {
-      vds_[vd_index].b_off_ = off;
-      off += vds_[vd_index].b_cnt_;
-    }
   }
   // // create tmp file
   // tmp_path_ = std::format("{}/heapkv/{}.tmp",

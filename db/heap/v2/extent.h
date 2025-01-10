@@ -215,7 +215,7 @@ class ExtentMeta {
   }
   void UpdateMetaAndFile(MetaInfo meta, std::unique_ptr<ExtentFile> new_file) {
     auto vig = lock_vi();
-    std::shared_lock<std::shared_mutex> g(meta_mu_);
+    std::lock_guard<std::shared_mutex> g(meta_mu_);
     meta_ = meta;
     file_ = std::move(new_file);
     file_epoch_hint_.store(meta_.fn_.file_epoch_, std::memory_order_relaxed);

@@ -3,6 +3,8 @@
 #include "db/heap/v2/heap_garbage_collector.h"
 
 #include "db/dbformat.h"
+#include "db/heap/utils.h"
+#include "db/heap/v2/extent.h"
 #include "db/heap/v2/heap_value_index.h"
 #include "rocksdb/status.h"
 
@@ -27,12 +29,12 @@ Status HeapGarbageCollector::OutputKeyValue(const Slice& key,
   }
   pending_hvi_.pop_back();
   for (auto& p : pending_hvi_) {
-    auto it = garbage_.find(p.extent_.file_number_);
+    auto it = garbage_.find(p.file_number_);
     if (it == garbage_.end()) {
-      it = garbage_.emplace(p.extent_.file_number_, ExtentGarbage{}).first;
+      it = garbage_.emplace(p.file_number_, ExtentGarbage{}).first;
       it->second.value_index_list_.emplace_back();
     }
-    it->second.b_cnt_ += p.value_addr_.b_cnt_;
+    it->second.b_cnt_ += align_up(p.value_size_, kBlockSize) / kBlockSize;
     it->second.value_index_list_[0].push_back(p.value_index_);
   }
   pending_hvi_.clear();
@@ -41,12 +43,12 @@ Status HeapGarbageCollector::OutputKeyValue(const Slice& key,
 
 auto HeapGarbageCollector::FinalizeDropResult() -> CompactionHeapGarbage {
   for (auto& p : pending_hvi_) {
-    auto it = garbage_.find(p.extent_.file_number_);
+    auto it = garbage_.find(p.file_number_);
     if (it == garbage_.end()) {
-      it = garbage_.emplace(p.extent_.file_number_, ExtentGarbage{}).first;
+      it = garbage_.emplace(p.file_number_, ExtentGarbage{}).first;
       it->second.value_index_list_.emplace_back();
     }
-    it->second.b_cnt_ += p.value_addr_.b_cnt_;
+    it->second.b_cnt_ += align_up(p.value_size_, kBlockSize) / kBlockSize;
     it->second.value_index_list_[0].push_back(p.value_index_);
   }
   if (garbage_.empty()) {

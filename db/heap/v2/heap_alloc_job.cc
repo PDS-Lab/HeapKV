@@ -126,8 +126,8 @@ Status HeapAllocJob::Add(const Slice& key, const Slice& value,
   memcpy(buf + cursor_, value.data(), value.size());
   uint32_t checksum = Lower32of64(XXH3_64bits(value.data_, value.size()));
   cursor_ += aligned_value_size;
-  *hvi = HeapValueIndex(ikey.sequence, locked_extents_.back()->file_name(), va,
-                        vi, value.size(), checksum, kNoCompression);
+  *hvi = HeapValueIndex(locked_extents_.back()->file_name().file_number_, vi,
+                        value.size(), checksum, ikey.sequence, kNoCompression);
   return s;
 }
 

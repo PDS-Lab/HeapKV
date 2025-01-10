@@ -121,6 +121,13 @@ Status ExtentStorage::OpenStorage(std::string_view db_name,
     es->UnlockExtent(async_handle[i].file_name.file_number_,
                      async_handle[i].meta->meta().base_alloc_block_off_);
   }
+  PinnableSlice value_index_block;
+  // warm up
+  for (size_t i = 0; i < async_handle.size(); i++) {
+    auto f = async_handle[i].meta->file();
+    es->GetValueIndexBlock(io_engine, async_handle[i].meta, &f,
+                           &value_index_block, nullptr);
+  }
   *storage = std::move(es);
   return Status::OK();
 }
@@ -164,15 +171,11 @@ auto ExtentStorage::GetHeapValueAsync(
   }
 
   // read heap value
-  ValueAddr va = hvi.value_addr_;
-  ExtentMeta* meta = GetExtentMeta(hvi.extent_.file_number_);
+  ValueAddr va;
+  ExtentMeta* meta = GetExtentMeta(hvi.file_number_);
   std::shared_ptr<ExtentFile> file = meta->file();
   size_t issue_io = 0;
-  if (hvi.extent_.file_epoch_ != file->file_name().file_epoch_) {
-    // ultra slow path
-    // gc happened, we need to fetch new value addr through value index
-    s = GetValueAddr(io_engine, meta, hvi.value_index_, &file, &va, &issue_io);
-  }
+  s = GetValueAddr(io_engine, meta, hvi.value_index_, &file, &va, &issue_io);
   if (!s.ok()) {
     return HeapValueGetContext(s, hvi, nullptr, nullptr, {nullptr, std::free});
   }

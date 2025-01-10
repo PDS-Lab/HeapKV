@@ -17,6 +17,7 @@
 #include "memory/memory_allocator_impl.h"
 #include "rocksdb/cache.h"
 #include "rocksdb/status.h"
+#include "rocksdb/types.h"
 
 namespace HEAPKV_NS_V2 {
 
@@ -29,7 +30,7 @@ class HeapValueCacheKey : private CacheKey {
 
  public:
   HeapValueCacheKey(CacheKey cache_key, const HeapValueIndex& hvi)
-      : HeapValueCacheKey(cache_key, hvi.seq_num(), hvi.extent_.file_number_,
+      : HeapValueCacheKey(cache_key, hvi.seq_num(), hvi.file_number_,
                           hvi.value_index_) {}
   HeapValueCacheKey(CacheKey cache_key, SequenceNumber seq,
                     uint32_t file_number, uint32_t value_index)

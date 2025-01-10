@@ -576,9 +576,9 @@ void CompactionIterator::NextFromInput() {
 
       current_key_committed_ = KeyCommitted(ikey_.sequence);
 
-      if (current_key_committed_) {
-        ReplaceValueAddrIfNeeded();
-      }
+      // if (current_key_committed_) {
+      //   ReplaceValueAddrIfNeeded();
+      // }
       // Apply the compaction filter to the first committed version of the user
       // key.
       if (current_key_committed_ &&
@@ -603,9 +603,9 @@ void CompactionIterator::NextFromInput() {
         current_key_committed_ = KeyCommitted(ikey_.sequence);
         // Apply the compaction filter to the first committed version of the
         // user key.
-        if (current_key_committed_) {
-          ReplaceValueAddrIfNeeded();
-        }
+        // if (current_key_committed_) {
+        //   ReplaceValueAddrIfNeeded();
+        // }
         if (current_key_committed_ &&
             !InvokeFilterIfNeeded(&need_skip, &skip_until)) {
           break;
@@ -1239,49 +1239,49 @@ void CompactionIterator::GarbageCollectBlobIfNeeded() {
   }
 }
 
-bool CompactionIterator::ReplaceValueAddrIfNeeded() {
-  if (ikey_.type != kTypeHeapValueIndex) {
-    return true;
-  }
-  if (compaction_ == nullptr) {
-    return true;
-  }
-  ColumnFamilyData* cfd = nullptr;
-  if (compaction_->input_version() != nullptr) {
-    cfd = compaction_->input_version()->cfd();
-  }
-  if (cfd == nullptr && compaction_->real_compaction() != nullptr) {
-    cfd = compaction_->real_compaction()->column_family_data();
-  }
-  if (cfd == nullptr || cfd->extent_storage() == nullptr) {
-    return true;
-  }
-  auto hvi = heapkv::v2::HeapValueIndex::DecodeFrom(value_);
-  auto meta = cfd->extent_storage()->GetExtentMeta(hvi.extent_.file_number_);
-  uint32_t epoch = meta->read_epoch_unsafe();
-  if (epoch == hvi.extent_.file_epoch_) {
-    return true;
-  }
-  auto file = meta->file();
-  heapkv::v2::ValueAddr va;
-  size_t issue_io = 0;
-  Status s = cfd->extent_storage()->GetValueAddr(
-      heapkv::GetThreadLocalIoEngine(), meta, hvi.value_index_, &file, &va,
-      &issue_io);
-  if (!s.ok()) {
-    return false;
-  }
-  if (issue_io > 0) {
-    RecordTick(cfd->ioptions()->statistics.get(), HEAPKV_FREE_JOB_BYTES_READ,
-               issue_io);
-  }
-  hvi.extent_.file_epoch_ = file->file_name().file_epoch_;
-  hvi.value_addr_ = va;
-  heap_value_index_.clear();
-  hvi.EncodeTo(&heap_value_index_);
-  value_ = heap_value_index_;
-  return true;
-}
+// bool CompactionIterator::ReplaceValueAddrIfNeeded() {
+//   if (ikey_.type != kTypeHeapValueIndex) {
+//     return true;
+//   }
+//   if (compaction_ == nullptr) {
+//     return true;
+//   }
+//   ColumnFamilyData* cfd = nullptr;
+//   if (compaction_->input_version() != nullptr) {
+//     cfd = compaction_->input_version()->cfd();
+//   }
+//   if (cfd == nullptr && compaction_->real_compaction() != nullptr) {
+//     cfd = compaction_->real_compaction()->column_family_data();
+//   }
+//   if (cfd == nullptr || cfd->extent_storage() == nullptr) {
+//     return true;
+//   }
+//   auto hvi = heapkv::v2::HeapValueIndex::DecodeFrom(value_);
+//   auto meta = cfd->extent_storage()->GetExtentMeta(hvi.extent_.file_number_);
+//   uint32_t epoch = meta->read_epoch_unsafe();
+//   if (epoch == hvi.extent_.file_epoch_) {
+//     return true;
+//   }
+//   auto file = meta->file();
+//   heapkv::v2::ValueAddr va;
+//   size_t issue_io = 0;
+//   Status s = cfd->extent_storage()->GetValueAddr(
+//       heapkv::GetThreadLocalIoEngine(), meta, hvi.value_index_, &file, &va,
+//       &issue_io);
+//   if (!s.ok()) {
+//     return false;
+//   }
+//   if (issue_io > 0) {
+//     RecordTick(cfd->ioptions()->statistics.get(), HEAPKV_FREE_JOB_BYTES_READ,
+//                issue_io);
+//   }
+//   hvi.extent_.file_epoch_ = file->file_name().file_epoch_;
+//   hvi.value_addr_ = va;
+//   heap_value_index_.clear();
+//   hvi.EncodeTo(&heap_value_index_);
+//   value_ = heap_value_index_;
+//   return true;
+// }
 
 void CompactionIterator::DecideOutputLevel() {
   assert(compaction_->SupportsPerKeyPlacement());

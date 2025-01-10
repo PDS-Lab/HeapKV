@@ -319,7 +319,7 @@ class CompactionIterator {
 
   // Check whether file_epoch in HeapValueIndex matched with current file epoch.
   // If not, update file_epoch and ValueAddr
-  bool ReplaceValueAddrIfNeeded();
+  // bool ReplaceValueAddrIfNeeded();
 
   // Given a sequence number, return the sequence number of the
   // earliest snapshot that this sequence number is visible in.
