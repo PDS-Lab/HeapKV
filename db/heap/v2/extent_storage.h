@@ -29,9 +29,6 @@ class HeapValueCacheKey : private CacheKey {
   [[maybe_unused]] uint32_t value_index_;
 
  public:
-  HeapValueCacheKey(CacheKey cache_key, const HeapValueIndex& hvi)
-      : HeapValueCacheKey(cache_key, hvi.seq_num(), hvi.file_number_,
-                          hvi.value_index_) {}
   HeapValueCacheKey(CacheKey cache_key, SequenceNumber seq,
                     uint32_t file_number, uint32_t value_index)
       : CacheKey(cache_key),
@@ -70,6 +67,7 @@ class HeapValueGetContext {
  private:
   Status status_;
   HeapValueIndex hvi_;
+  SequenceNumber seq_;
   std::shared_ptr<ExtentFile> file_;
   // will be set if cache hit
   CacheHandleGuard<HeapCacheData> cache_guard_;
@@ -77,19 +75,22 @@ class HeapValueGetContext {
   std::unique_ptr<uint8_t[], decltype(std::free)*> buffer_;
 
  public:
-  HeapValueGetContext(Status s, HeapValueIndex hvi,
+  HeapValueGetContext(Status s, HeapValueIndex hvi, SequenceNumber seq,
                       std::shared_ptr<ExtentFile> file,
                       std::unique_ptr<UringCmdFuture> future,
                       std::unique_ptr<uint8_t[], decltype(std::free)*> buffer)
       : status_(s),
         hvi_(hvi),
+        seq_(seq),
         file_(std::move(file)),
         future_(std::move(future)),
         buffer_(std::move(buffer)) {}
-  HeapValueGetContext(HeapValueIndex hvi, std::shared_ptr<ExtentFile> file,
+  HeapValueGetContext(HeapValueIndex hvi, SequenceNumber seq,
+                      std::shared_ptr<ExtentFile> file,
                       std::unique_ptr<UringCmdFuture> future,
                       std::unique_ptr<uint8_t[], decltype(std::free)*> buffer)
       : hvi_(hvi),
+        seq_(seq),
         file_(std::move(file)),
         future_(std::move(future)),
         buffer_(std::move(buffer)) {}
@@ -163,9 +164,11 @@ class ExtentStorage {
                       ValueAddr* value_addr, size_t* issue_io);
   // fetch value
   auto GetHeapValueAsync(const ReadOptions& ro, UringIoEngine* io_engine,
-                         const HeapValueIndex& hvi) -> HeapValueGetContext;
+                         const HeapValueIndex& hvi,
+                         SequenceNumber seq) -> HeapValueGetContext;
   auto GetHeapValue(const ReadOptions& ro, UringIoEngine* io_engine,
-                    const HeapValueIndex& hvi, PinnableSlice* value) -> Status;
+                    const HeapValueIndex& hvi, SequenceNumber seq,
+                    PinnableSlice* value) -> Status;
   auto WaitAsyncGet(const ReadOptions& ro, HeapValueGetContext ctx,
                     PinnableSlice* value) -> Status;
   auto GetValueIndexBlock(UringIoEngine* io_engine, ExtentMeta* meta,

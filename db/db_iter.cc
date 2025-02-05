@@ -409,12 +409,14 @@ bool DBIter::FindNextUserEntryInternal(bool skipping_saved_key,
             // they are hidden by this deletion.
             if (timestamp_lb_) {
               saved_key_.SetInternalKey(ikey_);
+              saved_seq_ = ikey_.sequence;
               valid_ = true;
               return true;
             } else {
               saved_key_.SetUserKey(
                   ikey_.user_key, !pin_thru_lifetime_ ||
                                       !iter_.iter()->IsKeyPinned() /* copy */);
+              saved_seq_ = ikey_.sequence;
               skipping_saved_key = true;
               PERF_COUNTER_ADD(internal_delete_skipped_count, 1);
             }
@@ -433,6 +435,7 @@ bool DBIter::FindNextUserEntryInternal(bool skipping_saved_key,
                   ikey_.user_key, !pin_thru_lifetime_ ||
                                       !iter_.iter()->IsKeyPinned() /* copy */);
             }
+            saved_seq_ = ikey_.sequence;
 
             if (ikey_.type == kTypeBlobIndex) {
               if (!SetBlobValueIfNeeded(ikey_.user_key, iter_.value())) {
@@ -467,6 +470,7 @@ bool DBIter::FindNextUserEntryInternal(bool skipping_saved_key,
             saved_key_.SetUserKey(
                 ikey_.user_key,
                 !pin_thru_lifetime_ || !iter_.iter()->IsKeyPinned() /* copy */);
+            saved_seq_ = ikey_.sequence;
             // By now, we are sure the current ikey is going to yield a value
             current_entry_is_merged_ = true;
             valid_ = true;
@@ -496,6 +500,7 @@ bool DBIter::FindNextUserEntryInternal(bool skipping_saved_key,
         saved_key_.SetUserKey(
             ikey_.user_key,
             !iter_.iter()->IsKeyPinned() || !pin_thru_lifetime_ /* copy */);
+        saved_seq_ = ikey_.sequence;
         skipping_saved_key = false;
         num_skipped = 0;
         reseek_done = false;
@@ -829,7 +834,7 @@ void DBIter::PrevInternal(const Slice* prefix) {
     saved_key_.SetUserKey(
         ExtractUserKey(iter_.key()),
         !iter_.iter()->IsKeyPinned() || !pin_thru_lifetime_ /* copy */);
-
+    saved_seq_ = ikey_.sequence;
     assert(prefix == nullptr || prefix_extractor_ != nullptr);
     if (prefix != nullptr &&
         prefix_extractor_
@@ -962,11 +967,13 @@ bool DBIter::FindValueForCurrentKey() {
       // Since the preceding ParseKey(&ikey) succeeds, so must this.
       assert(ret);
       saved_key_.SetInternalKey(ikey);
+      saved_seq_ = ikey_.sequence;
     } else if (user_comparator_.Compare(ikey.user_key,
                                         saved_key_.GetUserKey()) < 0) {
       saved_key_.SetUserKey(
           ikey.user_key,
           !pin_thru_lifetime_ || !iter_.iter()->IsKeyPinned() /* copy */);
+      saved_seq_ = ikey_.sequence;
     }
 
     valid_entry_seen = true;
@@ -1210,6 +1217,7 @@ bool DBIter::FindValueForCurrentKeyUsingSeek() {
     } else {
       valid_ = true;
       saved_key_.SetInternalKey(ikey);
+      saved_seq_ = ikey_.sequence;
     }
     return true;
   }
@@ -1249,6 +1257,7 @@ bool DBIter::FindValueForCurrentKeyUsingSeek() {
 
     if (timestamp_lb_ != nullptr) {
       saved_key_.SetInternalKey(ikey);
+      saved_seq_ = ikey_.sequence;
     }
 
     valid_ = true;
@@ -1833,7 +1842,8 @@ Slice HeapPrefetchDBIter::key() const {
 Slice HeapPrefetchDBIter::value() const {
   if (!enable_heap_prefetch) {
     if (db_iter_.IsHeapValue()) {
-      db_iter_.version_->GetHeapValue(ro_, db_iter_.value(), &heap_value_);
+      db_iter_.version_->GetHeapValue(ro_, db_iter_.value(), db_iter_.seq(),
+                                      &heap_value_);
       return heap_value_;
     } else {
       return db_iter_.value();

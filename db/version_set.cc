@@ -27,6 +27,7 @@
 #include "db/compaction/file_pri.h"
 #include "db/dbformat.h"
 #include "db/heap/io_engine.h"
+#include "db/heap/utils.h"
 #include "db/heap/v2/extent_storage.h"
 #include "db/heap/v2/heap_job_center.h"
 #include "db/heap/v2/heap_value_index.h"
@@ -46,6 +47,7 @@
 #include "rocksdb/options.h"
 #include "rocksdb/slice.h"
 #include "rocksdb/status.h"
+#include "rocksdb/types.h"
 #include "table/compaction_merging_iterator.h"
 
 #if USE_COROUTINES
@@ -2288,13 +2290,14 @@ Status Version::GetBlob(const ReadOptions& read_options, const Slice& user_key,
 
 Status Version::GetHeapValue(const ReadOptions& read_options,
                              const Slice& heap_value_index_slice,
-                             PinnableSlice* value) const {
+                             SequenceNumber seq, PinnableSlice* value) const {
   Status s;
   auto heap_value_index =
       heapkv::v2::HeapValueIndex::DecodeFrom(heap_value_index_slice);
   value->Reset();
-  s = cfd_->extent_storage()->GetHeapValue(
-      read_options, heapkv::GetThreadLocalIoEngine(), heap_value_index, value);
+  s = cfd_->extent_storage()->GetHeapValue(read_options,
+                                           heapkv::GetThreadLocalIoEngine(),
+                                           heap_value_index, seq, value);
   return s;
 }
 
@@ -2414,6 +2417,10 @@ void Version::Get(const ReadOptions& read_options, const LookupKey& k,
   bool is_heap_value_index = false;
   bool* const is_blob_to_use = is_blob ? is_blob : &is_blob_index;
   BlobFetcher blob_fetcher(this, read_options);
+  SequenceNumber inner_seq;
+  heapkv::finally([&]() {
+    if (seq != nullptr) *seq = inner_seq;
+  });
 
   assert(pinned_iters_mgr);
   GetContext get_context(
@@ -2421,7 +2428,7 @@ void Version::Get(const ReadOptions& read_options, const LookupKey& k,
       db_statistics_, status->ok() ? GetContext::kNotFound : GetContext::kMerge,
       user_key, do_merge ? value : nullptr, do_merge ? columns : nullptr,
       do_merge ? timestamp : nullptr, value_found, merge_context, do_merge,
-      max_covering_tombstone_seq, clock_, seq,
+      max_covering_tombstone_seq, clock_, &inner_seq,
       merge_operator_ ? pinned_iters_mgr : nullptr, callback, is_blob_to_use,
       &is_heap_value_index, tracing_get_id, &blob_fetcher,
       cfd_->extent_storage());
@@ -2533,7 +2540,8 @@ void Version::Get(const ReadOptions& read_options, const LookupKey& k,
                     : WideColumnsHelper::GetDefaultColumn(columns->columns());
           PinnableSlice result;
           // auto start = std::chrono::steady_clock::now();
-          *status = GetHeapValue(read_options, heap_value_index, &result);
+          *status =
+              GetHeapValue(read_options, heap_value_index, inner_seq, &result);
           // auto end = std::chrono::steady_clock::now();
           // get_blob_count.fetch_add(1, std::memory_order_relaxed);
           // get_blob_time_use.fetch_add(

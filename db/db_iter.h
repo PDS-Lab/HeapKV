@@ -22,6 +22,7 @@
 #include "rocksdb/options.h"
 #include "rocksdb/slice.h"
 #include "rocksdb/status.h"
+#include "rocksdb/types.h"
 #include "rocksdb/wide_columns.h"
 #include "table/iterator_wrapper.h"
 
@@ -169,6 +170,7 @@ class DBIter final : public Iterator {
       return Slice(ukey_and_ts.data(), ukey_and_ts.size() - timestamp_size_);
     }
   }
+  SequenceNumber seq() const { return saved_seq_; }
   Slice value() const override {
     assert(valid_);
 
@@ -374,6 +376,7 @@ class DBIter final : public Iterator {
   SequenceNumber sequence_;
 
   IterKey saved_key_;
+  SequenceNumber saved_seq_;
   // Reusable internal key data structure. This is only used inside one function
   // and should not be used across functions. Reusing this object can reduce
   // overhead of calling construction of the function if creating it each time.

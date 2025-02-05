@@ -1110,6 +1110,7 @@ struct AdvancedColumnFamilyOptions {
   bool enable_heapkv = false;
   uint32_t min_heap_value_size = 900;
   double heap_extent_relocate_threshold = 0.3;
+  bool enable_fast_path_update = true;
 
   // Create ColumnFamilyOptions with default values for all fields
   AdvancedColumnFamilyOptions();

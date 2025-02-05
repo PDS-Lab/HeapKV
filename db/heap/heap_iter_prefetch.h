@@ -12,6 +12,7 @@
 #include "rocksdb/rocksdb_namespace.h"
 #include "rocksdb/slice.h"
 #include "rocksdb/status.h"
+#include "rocksdb/types.h"
 
 namespace ROCKSDB_NAMESPACE {
 
@@ -60,7 +61,7 @@ class PrefetchGroup {
 
  private:
   Status AppendUnit(const ReadOptions &ro, UringIoEngine *io_engine,
-                    const Slice user_key, const Slice value,
+                    const Slice user_key, SequenceNumber seq, const Slice value,
                     const bool is_heap_value);
   char *ReserveSpace(size_t n);
 };

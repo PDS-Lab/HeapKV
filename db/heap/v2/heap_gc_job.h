@@ -71,10 +71,10 @@ class HeapGcJob {
   uint64_t bytes_write_{0};
 
  private:
-  static constexpr size_t BUF_SIZE = 128 * 1024;
-  using BUF = char[BUF_SIZE];  // 128k
+  static constexpr size_t BUF_SIZE = 512 * 1024;
+  using BUF = char[BUF_SIZE];  // 512k
   static constexpr size_t MAX_MOVE_BLOCKS_PER_IO = BUF_SIZE / kBlockSize;
-  static constexpr size_t MAX_DEPTH = 16;
+  static constexpr size_t MAX_DEPTH = 4;
   BUF* buffers_{nullptr};
   struct RWPair {
     std::unique_ptr<UringCmdFuture> read{nullptr};

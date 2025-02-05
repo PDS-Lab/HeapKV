@@ -219,7 +219,8 @@ class GetContext {
 
   bool GetBlobValue(const Slice& user_key, const Slice& blob_index,
                     PinnableSlice* blob_value);
-  bool GetHeapValue(const Slice& heap_value_index, PinnableSlice* heap_value);
+  bool GetHeapValue(const Slice& heap_value_index, SequenceNumber seq,
+                    PinnableSlice* heap_value);
 
   void appendToReplayLog(ValueType type, Slice value, Slice ts);
 

@@ -23,6 +23,7 @@
 #include "rocksdb/statistics.h"
 #include "rocksdb/status.h"
 #include "rocksdb/system_clock.h"
+#include "rocksdb/types.h"
 
 namespace ROCKSDB_NAMESPACE {
 
@@ -384,7 +385,7 @@ bool GetContext::SaveValue(const ParsedInternalKey& parsed_key,
               push_operand(blob_value, nullptr);
             } else if (type == kTypeHeapValueIndex) {
               PinnableSlice pin_val;
-              if (GetHeapValue(value, &pin_val) == false) {
+              if (GetHeapValue(value, parsed_key.sequence, &pin_val) == false) {
                 return false;
               }
               Slice heap_value(pin_val);
@@ -425,7 +426,7 @@ bool GetContext::SaveValue(const ParsedInternalKey& parsed_key,
             }
           } else if (type == kTypeHeapValueIndex) {
             PinnableSlice pin_val;
-            if (GetHeapValue(value, &pin_val) == false) {
+            if (GetHeapValue(value, parsed_key.sequence, &pin_val) == false) {
               return false;
             }
             Slice heap_value(pin_val);
@@ -600,12 +601,12 @@ bool GetContext::GetBlobValue(const Slice& user_key, const Slice& blob_index,
   return true;
 }
 
-bool GetContext::GetHeapValue(const Slice& heap_index,
+bool GetContext::GetHeapValue(const Slice& heap_index, SequenceNumber seq,
                               PinnableSlice* heap_value) {
   auto hvi = heapkv::v2::HeapValueIndex::DecodeFrom(heap_index);
 
   Status s = extent_storage_->GetHeapValue(
-      read_options_, heapkv::GetThreadLocalIoEngine(), hvi, heap_value);
+      read_options_, heapkv::GetThreadLocalIoEngine(), hvi, seq, heap_value);
   if (!s.ok()) {
     if (s.IsIncomplete()) {
       MarkKeyMayExist();

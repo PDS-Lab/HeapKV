@@ -48,6 +48,7 @@
 #include "db/version_edit.h"
 #include "db/write_controller.h"
 #include "env/file_system_tracer.h"
+#include "rocksdb/types.h"
 #if USE_COROUTINES
 #include "folly/experimental/coro/BlockingWait.h"
 #include "folly/experimental/coro/Collect.h"
@@ -918,7 +919,7 @@ class Version {
                  uint64_t* bytes_read) const;
 
   Status GetHeapValue(const ReadOptions& read_options,
-                      const Slice& heap_value_index_slice,
+                      const Slice& heap_value_index_slice, SequenceNumber seq,
                       PinnableSlice* value) const;
 
   struct BlobReadContext {

@@ -12,6 +12,7 @@
 #include "rocksdb/options.h"
 #include "rocksdb/slice.h"
 #include "rocksdb/status.h"
+#include "rocksdb/types.h"
 
 namespace ROCKSDB_NAMESPACE {
 namespace heapkv {
@@ -56,7 +57,7 @@ Status PrefetchGroup::DoPrefetch(const ReadOptions &ro,
     return s;
   }
   for (size_t i = 0; i < batch && iter->Valid() && s.ok(); i++, iter->Next()) {
-    s = AppendUnit(ro, io_engine, iter->key(), iter->value(),
+    s = AppendUnit(ro, io_engine, iter->key(), iter->seq(), iter->value(),
                    iter->IsHeapValue());
   }
   valid_ = s.ok() && !prefetch_list_.empty();
@@ -65,7 +66,8 @@ Status PrefetchGroup::DoPrefetch(const ReadOptions &ro,
 
 Status PrefetchGroup::AppendUnit(const ReadOptions &ro,
                                  UringIoEngine *io_engine, const Slice user_key,
-                                 const Slice value, const bool is_heap_value) {
+                                 SequenceNumber seq, const Slice value,
+                                 const bool is_heap_value) {
   Status s = Status::OK();
   size_t space = user_key.size() + value.size();
   char *ptr = ReserveSpace(space);
@@ -80,7 +82,7 @@ Status PrefetchGroup::AppendUnit(const ReadOptions &ro,
     pu.value_ = Slice(ptr + user_key.size(), value.size());
     if (is_heap_value) {
       auto hvi = v2::HeapValueIndex::DecodeFrom(value);
-      auto getCtx = extent_storage_->GetHeapValueAsync(ro, io_engine, hvi);
+      auto getCtx = extent_storage_->GetHeapValueAsync(ro, io_engine, hvi, seq);
       pu.async_ctx_ = std::make_unique<decltype(getCtx)>(std::move(getCtx));
     }
     prefetch_list_.push_back(std::move(pu));

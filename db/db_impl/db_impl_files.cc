@@ -398,20 +398,22 @@ void DBImpl::DeleteObsoleteFileImpl(int job_id, const std::string& fname,
         &event_logger_, job_id, number, fname, file_deletion_status, GetName(),
         immutable_db_options_.listeners);
     // TODO(wnj): maybe use eventlistener and dont use db mutex.
-    autovector<heapkv::v2::HeapJobCenter*> jcs;
-    mutex_.Lock();
-    // we dont know which column family the file belongs to
-    auto cfs = versions_->GetColumnFamilySet();
-    for (auto cfd : *cfs) {
-      if (!cfd->IsDropped() && cfd->heap_job_center() != nullptr) {
-        jcs.push_back(cfd->heap_job_center());
-      }
-    }
-    mutex_.Unlock();
-    for (auto jc : jcs) {
-      jc->NotifyFileDeletion(number);
-      jc->MaybeScheduleGc();
-    }
+    default_cf_handle_->cfd()->heap_job_center()->NotifyFileDeletion(number);
+    default_cf_handle_->cfd()->heap_job_center()->MaybeScheduleGc();
+    // autovector<heapkv::v2::HeapJobCenter*> jcs;
+    // mutex_.Lock();
+    // // we dont know which column family the file belongs to
+    // auto cfs = versions_->GetColumnFamilySet();
+    // for (auto cfd : *cfs) {
+    //   if (!cfd->IsDropped() && cfd->heap_job_center() != nullptr) {
+    //     jcs.push_back(cfd->heap_job_center());
+    //   }
+    // }
+    // mutex_.Unlock();
+    // for (auto jc : jcs) {
+    //   jc->NotifyFileDeletion(number);
+    //   jc->MaybeScheduleGc();
+    // }
   }
   if (type == kBlobFile) {
     EventHelpers::LogAndNotifyBlobFileDeletion(

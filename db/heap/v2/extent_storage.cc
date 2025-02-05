@@ -19,6 +19,7 @@
 #include "monitoring/statistics_impl.h"
 #include "rocksdb/slice.h"
 #include "rocksdb/status.h"
+#include "rocksdb/types.h"
 #include "util/hash.h"
 #include "util/xxhash.h"
 
@@ -147,16 +148,17 @@ Status ExtentStorage::GetValueAddr(UringIoEngine* io_engine, ExtentMeta* meta,
 }
 
 auto ExtentStorage::GetHeapValueAsync(
-    const ReadOptions& ro, UringIoEngine* io_engine,
-    const HeapValueIndex& hvi) -> HeapValueGetContext {
+    const ReadOptions& ro, UringIoEngine* io_engine, const HeapValueIndex& hvi,
+    SequenceNumber seq) -> HeapValueGetContext {
   Status s;
   if (heap_value_cache_) {
-    HeapValueCacheKey key(hv_cache_key_, hvi);
+    HeapValueCacheKey key(hv_cache_key_, seq, hvi.file_number_,
+                          hvi.value_index_);
     auto handle = heap_value_cache_->Lookup(GetSliceForKey(&key));
     if (handle) {
       // ctx will have ownership of the cache handle
       auto ctx =
-          HeapValueGetContext(hvi, nullptr, nullptr, {nullptr, std::free});
+          HeapValueGetContext(hvi, seq, nullptr, nullptr, {nullptr, std::free});
       ctx.SetCacheHandle(heap_value_cache_.get(), handle);
       return ctx;
     }
@@ -167,30 +169,34 @@ auto ExtentStorage::GetHeapValueAsync(
   if (no_io) {
     return HeapValueGetContext(
         Status::Incomplete("Cannot read heap value: no disk I/O allowed"), hvi,
-        nullptr, nullptr, {nullptr, std::free});
+        seq, nullptr, nullptr, {nullptr, std::free});
   }
 
   // read heap value
-  ValueAddr va;
+  ValueAddr va(hvi.b_off_, (hvi.value_size_ + kBlockSize - 1) / kBlockSize);
   ExtentMeta* meta = GetExtentMeta(hvi.file_number_);
   std::shared_ptr<ExtentFile> file = meta->file();
   size_t issue_io = 0;
-  s = GetValueAddr(io_engine, meta, hvi.value_index_, &file, &va, &issue_io);
+  if (file->file_name().file_epoch_ != hvi.file_epoch_) {
+    s = GetValueAddr(io_engine, meta, hvi.value_index_, &file, &va, &issue_io);
+  }
+
   if (!s.ok()) {
-    return HeapValueGetContext(s, hvi, nullptr, nullptr, {nullptr, std::free});
+    return HeapValueGetContext(s, hvi, seq, nullptr, nullptr,
+                               {nullptr, std::free});
   }
   void* ptr = std::aligned_alloc(kBlockSize, kBlockSize * va.b_cnt());
   auto f = file->ReadValueAsync(io_engine, va, ptr);
-  return HeapValueGetContext(hvi, std::move(file), std::move(f),
+  return HeapValueGetContext(hvi, seq, std::move(file), std::move(f),
                              std::unique_ptr<uint8_t[], decltype(std::free)*>(
                                  static_cast<uint8_t*>(ptr), std::free));
 }
 
 auto ExtentStorage::GetHeapValue(const ReadOptions& ro,
                                  UringIoEngine* io_engine,
-                                 const HeapValueIndex& hvi,
+                                 const HeapValueIndex& hvi, SequenceNumber seq,
                                  PinnableSlice* value) -> Status {
-  auto ctx = GetHeapValueAsync(ro, io_engine, hvi);
+  auto ctx = GetHeapValueAsync(ro, io_engine, hvi, seq);
   return WaitAsyncGet(ro, std::move(ctx), value);
 }
 
@@ -229,7 +235,9 @@ auto ExtentStorage::WaitAsyncGet(const ReadOptions& ro, HeapValueGetContext ctx,
   // TODO(wnj): decompress the value
   if (heap_value_cache_ && ro.fill_cache) {
     // cache the value
-    HeapValueCacheKey key(hv_cache_key_, ctx.heap_value_index());
+    HeapValueCacheKey key(hv_cache_key_, ctx.seq_,
+                          ctx.heap_value_index().file_number_,
+                          ctx.heap_value_index().value_index_);
     auto cache_ptr = AllocateAndCopyBlock(
         Slice(reinterpret_cast<const char*>(ctx.buffer_.get()),
               ctx.heap_value_index().value_size_),
