@@ -25,6 +25,10 @@
 
 namespace HEAPKV_NS_V2 {
 
+const bool enable_fast_path = true;
+const bool enable_index_cache = true;
+const bool enable_value_cache = true;
+
 ExtentMeta* ExtentStorage::GetExtentMeta(uint32_t file_number) {
   uint32_t i1 = file_number / (sizeof(ExtentList) / sizeof(ExtentMeta));
   auto list = extents_[i1].load();
@@ -151,7 +155,7 @@ auto ExtentStorage::GetHeapValueAsync(
     const ReadOptions& ro, UringIoEngine* io_engine, const HeapValueIndex& hvi,
     SequenceNumber seq) -> HeapValueGetContext {
   Status s;
-  if (heap_value_cache_) {
+  if (enable_value_cache && heap_value_cache_) {
     HeapValueCacheKey key(hv_cache_key_, seq, hvi.file_number_,
                           hvi.value_index_);
     auto handle = heap_value_cache_->Lookup(GetSliceForKey(&key));
@@ -177,7 +181,7 @@ auto ExtentStorage::GetHeapValueAsync(
   ExtentMeta* meta = GetExtentMeta(hvi.file_number_);
   std::shared_ptr<ExtentFile> file = meta->file();
   size_t issue_io = 0;
-  if (file->file_name().file_epoch_ != hvi.file_epoch_) {
+  if (!enable_fast_path || file->file_name().file_epoch_ != hvi.file_epoch_) {
     s = GetValueAddr(io_engine, meta, hvi.value_index_, &file, &va, &issue_io);
   }
 
@@ -233,7 +237,7 @@ auto ExtentStorage::WaitAsyncGet(const ReadOptions& ro, HeapValueGetContext ctx,
     }
   }
   // TODO(wnj): decompress the value
-  if (heap_value_cache_ && ro.fill_cache) {
+  if (enable_value_cache && heap_value_cache_ && ro.fill_cache) {
     // cache the value
     HeapValueCacheKey key(hv_cache_key_, ctx.seq_,
                           ctx.heap_value_index().file_number_,
@@ -281,7 +285,7 @@ auto ExtentStorage::GetValueIndexBlock(UringIoEngine* io_engine,
                                        size_t* issue_io) -> Status {
   Status s;
   ValueIndexCacheKey key(vi_cache_key_, (*file)->file_name());
-  if (heap_value_cache_) {
+  if (enable_index_cache && heap_value_cache_) {
     auto handle = heap_value_cache_->Lookup(GetSliceForKey(&key));
     if (handle != nullptr) {
       auto cache_guard =
@@ -320,7 +324,7 @@ auto ExtentStorage::GetValueIndexBlock(UringIoEngine* io_engine,
   if (!s.ok()) {
     return s;
   }
-  if (heap_value_cache_) {
+  if (enable_index_cache && heap_value_cache_) {
     auto cap = AllocateAndCopyBlock(
         Slice(static_cast<char*>(ptr), n),
         heap_value_cache_ ? heap_value_cache_->memory_allocator() : nullptr);

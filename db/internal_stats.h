@@ -531,6 +531,10 @@ class InternalStats {
     comp_stats_by_pri_[thread_pri].Add(stats);
   }
 
+  void AddFlushStats(const CompactionStats& stats) {
+    flush_only_stats_.Add(stats);
+  }
+
   void AddCompactionStats(int level, Env::Priority thread_pri,
                           const CompactionStatsFull& comp_stats_full) {
     AddCompactionStats(level, thread_pri, comp_stats_full.stats);
@@ -657,6 +661,7 @@ class InternalStats {
   // Per-ColumnFamily/level compaction stats
   std::vector<CompactionStats> comp_stats_;
   std::vector<CompactionStats> comp_stats_by_pri_;
+  CompactionStats flush_only_stats_;
   CompactionStats per_key_placement_comp_stats_;
   std::vector<HistogramImpl> file_read_latency_;
   HistogramImpl blob_file_read_latency_;

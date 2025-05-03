@@ -13,6 +13,7 @@
 #include <algorithm>
 #include <cinttypes>
 #include <cstddef>
+#include <format>
 #include <limits>
 #include <sstream>
 #include <string>
@@ -1920,6 +1921,9 @@ void InternalStats::DumpCFStatsWriteStall(std::string* value,
 void InternalStats::DumpCFStats(std::string* value) {
   DumpCFStatsNoFileHistogram(/*is_periodic=*/false, value);
   DumpCFFileHistogram(value);
+  value->append(std::format(
+      "\n**************\nflush_micros:{} flush_count:{}\n**************\n",
+      flush_only_stats_.micros, flush_only_stats_.count));
 }
 
 void InternalStats::DumpCFStatsNoFileHistogram(bool is_periodic,
