@@ -96,7 +96,11 @@ class HeapValueGetContext {
   HeapValueGetContext& operator=(const HeapValueGetContext&) = delete;
   HeapValueGetContext(HeapValueGetContext&&) = default;
   HeapValueGetContext& operator=(HeapValueGetContext&&) = default;
-  ~HeapValueGetContext() = default;
+  ~HeapValueGetContext() {
+    if (future_ != nullptr) {
+      future_->Wait();
+    }
+  };
   Status status() { return status_; }
   const HeapValueIndex& heap_value_index() const { return hvi_; }
   void SetCacheHandle(Cache* cache, Cache::Handle* handle) {

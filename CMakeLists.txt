@@ -79,7 +79,7 @@ endif()
 option(ROCKSDB_BUILD_SHARED "Build shared versions of the RocksDB libraries" ON)
 
 if( NOT DEFINED CMAKE_CXX_STANDARD )
-  set(CMAKE_CXX_STANDARD 17)
+  set(CMAKE_CXX_STANDARD 20)
 endif()
 
 include(CMakeDependentOption)
@@ -292,7 +292,7 @@ endif()
 
 # Check if -latomic is required or not
 if (NOT MSVC)
-  set(CMAKE_REQUIRED_FLAGS "--std=c++17")
+  set(CMAKE_REQUIRED_FLAGS "--std=c++20")
   CHECK_CXX_SOURCE_COMPILES("
 #include <atomic>
 std::atomic<uint64_t> x(0);
@@ -682,14 +682,22 @@ set(SOURCES
   db/flush_job.cc
   db/flush_scheduler.cc
   db/forward_iterator.cc
-  db/heap/bitmap_allocator.cc
-  db/heap/extent.cc
-  db/heap/heap_alloc_job.cc
-  db/heap/heap_file.cc
-  db/heap/heap_gc_job.cc
-  db/heap/heap_garbage_collector.cc
-  db/heap/heap_prefetch_helper.cc
-  db/heap/heap_storage.cc
+  db/heap/v2/extent_storage.cc
+  db/heap/v2/extent.cc
+  db/heap/v2/heap_alloc_job.cc
+  db/heap/v2/heap_garbage_collector.cc
+  db/heap/v2/heap_gc_job.cc
+  db/heap/v2/heap_job_center.cc
+
+  # db/heap/bitmap_allocator.cc
+  # db/heap/extent.cc
+  # db/heap/heap_alloc_job.cc
+  # db/heap/heap_file.cc
+  # db/heap/heap_gc_job.cc
+  # db/heap/heap_garbage_collector.cc
+  db/heap/heap_iter_prefetch.cc
+
+  # db/heap/heap_storage.cc
   db/heap/io_engine.cc
   db/import_column_family_job.cc
   db/internal_stats.cc

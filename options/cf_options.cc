@@ -965,8 +965,8 @@ ImmutableCFOptions::ImmutableCFOptions(const ColumnFamilyOptions& cf_options)
           cf_options.persist_user_defined_timestamps),
       enable_heapkv(cf_options.enable_heapkv),
       min_heap_value_size(cf_options.min_heap_value_size),
-      heap_extent_allocatable_threshold(
-          cf_options.heap_extent_allocatable_threshold) {}
+      heap_extent_relocate_threshold(cf_options.heap_extent_relocate_threshold),
+      enable_fast_path_update(cf_options.enable_fast_path_update) {}
 
 ImmutableOptions::ImmutableOptions() : ImmutableOptions(Options()) {}
 

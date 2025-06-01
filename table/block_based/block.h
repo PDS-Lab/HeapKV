@@ -11,11 +11,9 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#include <cstdint>
 #include <string>
 #include <vector>
 
-#include "db/heap/heap_value_index.h"
 #include "db/kv_checksum.h"
 #include "db/pinned_iterators_manager.h"
 #include "port/malloc.h"
@@ -283,8 +281,6 @@ class Block {
   size_t size_;              // contents_.data.size()
   uint32_t restart_offset_;  // Offset in data_ of restart array
   uint32_t num_restarts_;
-  uint32_t heap_value_indices_offset_;
-  uint32_t num_heap_value_indices_;
   std::unique_ptr<BlockReadAmpBitmap> read_amp_bitmap_;
   char* kv_checksum_{nullptr};
   uint32_t checksum_size_{0};
@@ -439,8 +435,6 @@ class BlockIter : public InternalIteratorBase<TValue> {
   // Index of restart block in which current_ or current_-1 falls
   uint32_t restart_index_;
   uint32_t restarts_;  // Offset of restart array (list of fixed32)
-  uint32_t heap_value_indices_offset_;
-  uint32_t num_heap_value_indices_;
   // current_ is offset in data_ of current entry.  >= restarts_ if !Valid
   uint32_t current_;
   // Raw key from block.
@@ -477,8 +471,6 @@ class BlockIter : public InternalIteratorBase<TValue> {
   // as long as the cleanup functions are transferred to another class,
   // e.g. PinnableSlice, the pointer to the bytes will still be valid.
   bool block_contents_pinned_;
-  bool is_heap_value_index_;
-  uint32_t hvi_offset_;
 
   virtual void SeekToFirstImpl() = 0;
   virtual void SeekToLastImpl() = 0;
@@ -531,8 +523,6 @@ class BlockIter : public InternalIteratorBase<TValue> {
   // are needed only for per kv checksum verification.
   void InitializeBase(const Comparator* raw_ucmp, const char* data,
                       uint32_t restarts, uint32_t num_restarts,
-                      uint32_t heap_value_indices_offset,
-                      uint32_t num_heap_value_indices,
                       SequenceNumber global_seqno, bool block_contents_pinned,
                       bool user_defined_timestamp_persisted,
 
@@ -545,8 +535,6 @@ class BlockIter : public InternalIteratorBase<TValue> {
     data_ = data;
     restarts_ = restarts;
     num_restarts_ = num_restarts;
-    heap_value_indices_offset_ = heap_value_indices_offset;
-    num_heap_value_indices_ = num_heap_value_indices;
     current_ = restarts_;
     restart_index_ = num_restarts_;
     global_seqno_ = global_seqno;
@@ -560,8 +548,6 @@ class BlockIter : public InternalIteratorBase<TValue> {
     protection_bytes_per_key_ = protection_bytes_per_key;
     kv_checksum_ = kv_checksum;
     block_restart_interval_ = block_restart_interval;
-    is_heap_value_index_ = false;
-    hvi_offset_ = 0;
     // Checksum related states are either all 0/nullptr or all non-zero.
     // One exception is when num_restarts == 0, block_restart_interval can be 0
     // since we are not able to compute it.
@@ -708,19 +694,17 @@ class DataBlockIter final : public BlockIter<Slice> {
       : BlockIter(), read_amp_bitmap_(nullptr), last_bitmap_offset_(0) {}
   void Initialize(const Comparator* raw_ucmp, const char* data,
                   uint32_t restarts, uint32_t num_restarts,
-                  uint32_t heap_value_indices_offset,
-                  uint32_t num_heap_value_indices, SequenceNumber global_seqno,
+                  SequenceNumber global_seqno,
                   BlockReadAmpBitmap* read_amp_bitmap,
                   bool block_contents_pinned,
                   bool user_defined_timestamps_persisted,
                   DataBlockHashIndex* data_block_hash_index,
                   uint8_t protection_bytes_per_key, const char* kv_checksum,
                   uint32_t block_restart_interval) {
-    InitializeBase(raw_ucmp, data, restarts, num_restarts,
-                   heap_value_indices_offset, num_heap_value_indices,
-                   global_seqno, block_contents_pinned,
-                   user_defined_timestamps_persisted, protection_bytes_per_key,
-                   kv_checksum, block_restart_interval);
+    InitializeBase(raw_ucmp, data, restarts, num_restarts, global_seqno,
+                   block_contents_pinned, user_defined_timestamps_persisted,
+                   protection_bytes_per_key, kv_checksum,
+                   block_restart_interval);
     raw_key_.SetIsUserKey(false);
     read_amp_bitmap_ = read_amp_bitmap;
     last_bitmap_offset_ = current_ + 1;
@@ -735,13 +719,7 @@ class DataBlockIter final : public BlockIter<Slice> {
                              NextEntryOffset() - 1);
       last_bitmap_offset_ = current_;
     }
-    if (is_heap_value_index_) {
-      return Slice(data_ + heap_value_indices_offset_ +
-                       hvi_offset_ * heapkv::HeapValueIndex::IndexSize,
-                   heapkv::HeapValueIndex::IndexSize);
-    } else {
-      return value_;
-    }
+    return value_;
   }
 
   // Returns if `target` may exist.
@@ -765,17 +743,6 @@ class DataBlockIter final : public BlockIter<Slice> {
     prev_entries_keys_buff_.clear();
     prev_entries_.clear();
     prev_entries_idx_ = -1;
-  }
-
-  bool IsHeapValueIndex() const { return is_heap_value_index_; }
-  uint32_t HeapValueIndexOffset() const { return hvi_offset_; }
-  std::optional<Slice> GetHeapValueIndex(uint32_t offset) const {
-    if (offset >= num_heap_value_indices_) {
-      return std::nullopt;
-    }
-    return Slice(data_ + heap_value_indices_offset_ +
-                     offset * heapkv::HeapValueIndex::IndexSize,
-                 heapkv::HeapValueIndex::IndexSize);
   }
 
  protected:
@@ -831,14 +798,11 @@ class MetaBlockIter final : public BlockIter<Slice> {
  public:
   MetaBlockIter() : BlockIter() { raw_key_.SetIsUserKey(true); }
   void Initialize(const char* data, uint32_t restarts, uint32_t num_restarts,
-                  uint32_t heap_value_indices_offset,
-                  uint32_t num_heap_value_indices, bool block_contents_pinned,
-                  uint8_t protection_bytes_per_key, const char* kv_checksum,
-                  uint32_t block_restart_interval) {
+                  bool block_contents_pinned, uint8_t protection_bytes_per_key,
+                  const char* kv_checksum, uint32_t block_restart_interval) {
     // Initializes the iterator with a BytewiseComparator and
     // the raw key being a user key.
     InitializeBase(BytewiseComparator(), data, restarts, num_restarts,
-                   heap_value_indices_offset, num_heap_value_indices,
                    kDisableGlobalSequenceNumber, block_contents_pinned,
                    /* user_defined_timestamps_persisted */ true,
                    protection_bytes_per_key, kv_checksum,
@@ -875,16 +839,13 @@ class IndexBlockIter final : public BlockIter<IndexValue> {
   // applied to values.
   void Initialize(const Comparator* raw_ucmp, const char* data,
                   uint32_t restarts, uint32_t num_restarts,
-                  uint32_t heap_value_indices_offset,
-                  uint32_t num_heap_value_indices, SequenceNumber global_seqno,
-                  BlockPrefixIndex* prefix_index, bool have_first_key,
-                  bool key_includes_seq, bool value_is_full,
-                  bool block_contents_pinned,
+                  SequenceNumber global_seqno, BlockPrefixIndex* prefix_index,
+                  bool have_first_key, bool key_includes_seq,
+                  bool value_is_full, bool block_contents_pinned,
                   bool user_defined_timestamps_persisted,
                   uint8_t protection_bytes_per_key, const char* kv_checksum,
                   uint32_t block_restart_interval) {
     InitializeBase(raw_ucmp, data, restarts, num_restarts,
-                   heap_value_indices_offset, num_heap_value_indices,
                    kDisableGlobalSequenceNumber, block_contents_pinned,
                    user_defined_timestamps_persisted, protection_bytes_per_key,
                    kv_checksum, block_restart_interval);

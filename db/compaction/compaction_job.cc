@@ -11,6 +11,7 @@
 
 #include <algorithm>
 #include <cinttypes>
+#include <iostream>
 #include <memory>
 #include <optional>
 #include <set>
@@ -27,8 +28,8 @@
 #include "db/dbformat.h"
 #include "db/error_handler.h"
 #include "db/event_helpers.h"
-#include "db/heap/heap_garbage_collector.h"
-#include "db/heap/heap_storage.h"
+#include "db/heap/v2/heap_garbage_collector.h"
+#include "db/heap/v2/heap_job_center.h"
 #include "db/history_trimming_iterator.h"
 #include "db/log_writer.h"
 #include "db/merge_helper.h"
@@ -1227,8 +1228,9 @@ void CompactionJob::ProcessKeyValueCompaction(SubcompactionState* sub_compact) {
 
   if (sub_compact->compaction->immutable_options()->enable_heapkv) {
     auto collector = sub_compact->Current().CreateHeapValueGarbageCollector();
-    heap_value_checker = std::make_unique<heapkv::HeapValueGarbageCheckIterator>(
-        input, collector);
+    heap_value_checker =
+        std::make_unique<heapkv::v2::HeapValueGarbageCheckIterator>(input,
+                                                                    collector);
     input = heap_value_checker.get();
   }
 
@@ -1766,7 +1768,7 @@ Status CompactionJob::InstallCompactionResults(
   compaction->AddInputDeletions(edit);
 
   std::unordered_map<uint64_t, BlobGarbageMeter::BlobStats> blob_total_garbage;
-  std::vector<heapkv::ExtentGarbageSpan> heap_total_garbage;
+  heapkv::v2::CompactionHeapGarbage heap_total_garbage;
 
   for (const auto& sub_compact : compact_->sub_compact_states) {
     sub_compact.AddOutputsEdit(edit);
@@ -1794,15 +1796,20 @@ Status CompactionJob::InstallCompactionResults(
       auto res = sub_compact.Current()
                      .GetHeapValueGarbageCollector()
                      ->FinalizeDropResult();
-      heap_total_garbage.insert(heap_total_garbage.end(), res.begin(),
-                                res.end());
+      heapkv::v2::MergeGarbage(&heap_total_garbage, &res);
     }
   }
   if (!heap_total_garbage.empty()) {
-    heapkv::HeapGarbageCollector::CompactDropResult(heap_total_garbage);
+    // for (auto& [fn, vi_list] : heap_total_garbage[0]) {
+    //   std::cout << fn << ":[";
+    //   for (auto vi : vi_list) {
+    //     std::cout << vi << ",";
+    //   }
+    //   std::cout << "]\n";
+    // }
     compact_->compaction->column_family_data()
-        ->heap_storage()
-        ->CommitGarbageBlocks(*compact_->compaction, heap_total_garbage);
+        ->heap_job_center()
+        ->SubmitGarbage(*compact_->compaction, std::move(heap_total_garbage));
   }
 
   for (const auto& pair : blob_total_garbage) {

@@ -5,6 +5,8 @@
 
 #include "db/compaction/compaction_iterator.h"
 
+#include <cstddef>
+#include <cstdint>
 #include <iterator>
 #include <limits>
 
@@ -12,14 +14,19 @@
 #include "db/blob/blob_file_builder.h"
 #include "db/blob/blob_index.h"
 #include "db/blob/prefetch_buffer_collection.h"
+#include "db/column_family.h"
 #include "db/dbformat.h"
-#include "db/heap/heap_value_index.h"
+#include "db/heap/io_engine.h"
+#include "db/heap/v2/extent.h"
+#include "db/heap/v2/heap_value_index.h"
 #include "db/snapshot_checker.h"
 #include "db/wide/wide_column_serialization.h"
 #include "db/wide/wide_columns_helper.h"
 #include "logging/logging.h"
+#include "monitoring/statistics_impl.h"
 #include "port/likely.h"
 #include "rocksdb/listener.h"
+#include "rocksdb/statistics.h"
 #include "table/internal_iterator.h"
 #include "test_util/sync_point.h"
 
@@ -31,8 +38,9 @@ CompactionIterator::CompactionIterator(
     SequenceNumber job_snapshot, const SnapshotChecker* snapshot_checker,
     Env* env, bool report_detailed_time, bool expect_valid_internal_key,
     CompactionRangeDelAggregator* range_del_agg,
-    BlobFileBuilder* blob_file_builder, heapkv::HeapAllocJob* heap_alloc_job,
-    bool allow_data_in_errors, bool enforce_single_del_contracts,
+    BlobFileBuilder* blob_file_builder,
+    heapkv::v2::HeapAllocJob* heap_alloc_job, bool allow_data_in_errors,
+    bool enforce_single_del_contracts,
     const std::atomic<bool>& manual_compaction_canceled,
     bool must_count_input_entries, const Compaction* compaction,
     const CompactionFilter* compaction_filter,
@@ -60,8 +68,9 @@ CompactionIterator::CompactionIterator(
     SequenceNumber job_snapshot, const SnapshotChecker* snapshot_checker,
     Env* env, bool report_detailed_time, bool expect_valid_internal_key,
     CompactionRangeDelAggregator* range_del_agg,
-    BlobFileBuilder* blob_file_builder, heapkv::HeapAllocJob* heap_alloc_job,
-    bool allow_data_in_errors, bool enforce_single_del_contracts,
+    BlobFileBuilder* blob_file_builder,
+    heapkv::v2::HeapAllocJob* heap_alloc_job, bool allow_data_in_errors,
+    bool enforce_single_del_contracts,
     const std::atomic<bool>& manual_compaction_canceled,
     std::unique_ptr<CompactionProxy> compaction, bool must_count_input_entries,
     const CompactionFilter* compaction_filter,
@@ -567,6 +576,9 @@ void CompactionIterator::NextFromInput() {
 
       current_key_committed_ = KeyCommitted(ikey_.sequence);
 
+      if (current_key_committed_) {
+        ReplaceValueAddrIfNeeded();
+      }
       // Apply the compaction filter to the first committed version of the user
       // key.
       if (current_key_committed_ &&
@@ -591,6 +603,9 @@ void CompactionIterator::NextFromInput() {
         current_key_committed_ = KeyCommitted(ikey_.sequence);
         // Apply the compaction filter to the first committed version of the
         // user key.
+        if (current_key_committed_) {
+          ReplaceValueAddrIfNeeded();
+        }
         if (current_key_committed_ &&
             !InvokeFilterIfNeeded(&need_skip, &skip_until)) {
           break;
@@ -1110,7 +1125,7 @@ void CompactionIterator::ExtractLargeValueIfNeeded() {
     current_key_.UpdateInternalKey(ikey_.sequence, ikey_.type);
   } else if (heap_alloc_job_ &&
              value().size() >= heap_alloc_job_->min_heap_value_size()) {
-    heapkv::HeapValueIndex hvi;
+    heapkv::v2::HeapValueIndex hvi;
     const Status s = heap_alloc_job_->Add(key(), value(), &hvi);
     if (!s.ok()) {
       status_ = s;
@@ -1222,6 +1237,53 @@ void CompactionIterator::GarbageCollectBlobIfNeeded() {
       return;
     }
   }
+}
+
+bool CompactionIterator::ReplaceValueAddrIfNeeded() {
+  if (ikey_.type != kTypeHeapValueIndex) {
+    return true;
+  }
+  if (compaction_ == nullptr) {
+    return true;
+  }
+  ColumnFamilyData* cfd = nullptr;
+  if (compaction_->input_version() != nullptr) {
+    cfd = compaction_->input_version()->cfd();
+  }
+  if (cfd == nullptr && compaction_->real_compaction() != nullptr) {
+    cfd = compaction_->real_compaction()->column_family_data();
+  }
+  if (cfd == nullptr || cfd->extent_storage() == nullptr) {
+    return true;
+  }
+  if (!cfd->ioptions()->enable_fast_path_update) {
+    return true;
+  }
+  auto hvi = heapkv::v2::HeapValueIndex::DecodeFrom(value_);
+  auto meta = cfd->extent_storage()->GetExtentMeta(hvi.file_number_);
+  uint32_t epoch = meta->read_epoch_unsafe();
+  if (epoch == hvi.file_epoch_) {
+    return true;
+  }
+  auto file = meta->file();
+  heapkv::v2::ValueAddr va;
+  size_t issue_io = 0;
+  Status s = cfd->extent_storage()->GetValueAddr(
+      heapkv::GetThreadLocalIoEngine(), meta, hvi.value_index_, &file, &va,
+      &issue_io);
+  if (!s.ok()) {
+    return false;
+  }
+  if (issue_io > 0) {
+    RecordTick(cfd->ioptions()->statistics.get(), HEAPKV_FREE_JOB_BYTES_READ,
+               issue_io);
+  }
+  hvi.file_epoch_ = file->file_name().file_epoch_;
+  hvi.b_off_ = va.b_off();
+  heap_value_index_.clear();
+  hvi.EncodeTo(&heap_value_index_);
+  value_ = heap_value_index_;
+  return true;
 }
 
 void CompactionIterator::DecideOutputLevel() {

@@ -12,6 +12,7 @@
 #include <algorithm>
 #include <cinttypes>
 #include <limits>
+#include <memory>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -23,7 +24,7 @@
 #include "db/compaction/compaction_picker_level.h"
 #include "db/compaction/compaction_picker_universal.h"
 #include "db/db_impl/db_impl.h"
-#include "db/heap/heap_storage.h"
+#include "db/heap/v2/heap_job_center.h"
 #include "db/internal_stats.h"
 #include "db/job_context.h"
 #include "db/range_del_aggregator.h"
@@ -579,9 +580,9 @@ ColumnFamilyData::ColumnFamilyData(
   if (_dummy_versions != nullptr) {
     internal_stats_.reset(
         new InternalStats(ioptions_.num_levels, ioptions_.clock, this));
-    table_cache_.reset(new TableCache(this, ioptions_, file_options,
-                                      _table_cache, block_cache_tracer,
-                                      io_tracer, db_session_id));
+    table_cache_.reset(new TableCache(ioptions_, file_options, _table_cache,
+                                      block_cache_tracer, io_tracer,
+                                      db_session_id));
     blob_file_cache_.reset(
         new BlobFileCache(_table_cache, ioptions(), soptions(), id_,
                           internal_stats_->GetBlobFileReadHist(), io_tracer));
@@ -623,14 +624,17 @@ ColumnFamilyData::ColumnFamilyData(
     }
 
     if (ioptions_.enable_heapkv) {
-      Status s = heapkv::CFHeapStorage::OpenOrCreate(
-          column_family_set->db_name_, this, &heap_storage_);
+      Status s = heapkv::v2::ExtentStorage::OpenStorage(
+          column_family_set->db_name_, this, &extent_storage_);
+      // Status s = heapkv::CFHeapStorage::OpenOrCreate(
+      //     column_family_set->db_name_, this, &heap_storage_);
       if (!s.ok()) {
         ROCKS_LOG_ERROR(ioptions_.logger,
                         "Failed to open heap storage for column family %s: %s",
                         name.c_str(), s.ToString().c_str());
-        heap_storage_.reset();
+        extent_storage_.reset();
       }
+      heap_job_center_ = std::make_unique<heapkv::v2::HeapJobCenter>(this);
     }
   }
 

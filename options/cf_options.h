@@ -98,7 +98,8 @@ struct ImmutableCFOptions {
   // heapkv options
   bool enable_heapkv;
   uint32_t min_heap_value_size;
-  double heap_extent_allocatable_threshold;
+  double heap_extent_relocate_threshold;
+  bool enable_fast_path_update;
 };
 
 struct ImmutableOptions : public ImmutableDBOptions, public ImmutableCFOptions {

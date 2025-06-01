@@ -9,11 +9,12 @@
 
 #include "db/db_iter.h"
 
-#include <iostream>
+#include <cassert>
 #include <limits>
 #include <string>
 
 #include "db/dbformat.h"
+#include "db/heap/heap_iter_prefetch.h"
 #include "db/merge_context.h"
 #include "db/merge_helper.h"
 #include "db/pinned_iterators_manager.h"
@@ -21,17 +22,16 @@
 #include "db/wide/wide_columns_helper.h"
 #include "file/filename.h"
 #include "logging/logging.h"
-#include "memory/arena.h"
 #include "monitoring/perf_context_imp.h"
 #include "rocksdb/env.h"
 #include "rocksdb/iterator.h"
 #include "rocksdb/merge_operator.h"
 #include "rocksdb/options.h"
-#include "rocksdb/system_clock.h"
+#include "rocksdb/slice.h"
+#include "rocksdb/status.h"
 #include "table/internal_iterator.h"
 #include "table/iterator_wrapper.h"
 #include "trace_replay/trace_replay.h"
-#include "util/mutexlock.h"
 #include "util/string_util.h"
 #include "util/user_comparator_wrapper.h"
 
@@ -225,30 +225,30 @@ bool DBIter::SetBlobValueIfNeeded(const Slice& user_key,
   return true;
 }
 
-bool DBIter::SetHeapValue(const Slice& heap_value_index) {
-  assert(!is_heap_value_);
-  assert(heap_value_.empty());
+// bool DBIter::SetHeapValue(const Slice& heap_value_index) {
+//   assert(!is_heap_value_);
+//   assert(heap_value_.empty());
 
-  if (!version_) {
-    status_ = Status::Corruption("Encountered unexpected heap value index.");
-    valid_ = false;
-    return false;
-  }
-  ReadOptions read_options;
-  read_options.read_tier = read_tier_;
-  read_options.fill_cache = fill_cache_;
-  read_options.verify_checksums = verify_checksums_;
-  read_options.io_activity = io_activity_;
-  const Status s =
-      version_->GetHeapValue(read_options, heap_value_index, &heap_value_);
-  if (!s.ok()) {
-    status_ = s;
-    valid_ = false;
-    return false;
-  }
-  is_heap_value_ = true;
-  return true;
-}
+//   if (!version_) {
+//     status_ = Status::Corruption("Encountered unexpected heap value index.");
+//     valid_ = false;
+//     return false;
+//   }
+//   ReadOptions read_options;
+//   read_options.read_tier = read_tier_;
+//   read_options.fill_cache = fill_cache_;
+//   read_options.verify_checksums = verify_checksums_;
+//   read_options.io_activity = io_activity_;
+//   const Status s =
+//       version_->GetHeapValue(read_options, heap_value_index, &heap_value_);
+//   if (!s.ok()) {
+//     status_ = s;
+//     valid_ = false;
+//     return false;
+//   }
+//   is_heap_value_ = true;
+//   return true;
+// }
 
 bool DBIter::SetValueAndColumnsFromEntity(Slice slice) {
   assert(value_.empty());
@@ -409,12 +409,14 @@ bool DBIter::FindNextUserEntryInternal(bool skipping_saved_key,
             // they are hidden by this deletion.
             if (timestamp_lb_) {
               saved_key_.SetInternalKey(ikey_);
+              saved_seq_ = ikey_.sequence;
               valid_ = true;
               return true;
             } else {
               saved_key_.SetUserKey(
                   ikey_.user_key, !pin_thru_lifetime_ ||
                                       !iter_.iter()->IsKeyPinned() /* copy */);
+              saved_seq_ = ikey_.sequence;
               skipping_saved_key = true;
               PERF_COUNTER_ADD(internal_delete_skipped_count, 1);
             }
@@ -433,6 +435,7 @@ bool DBIter::FindNextUserEntryInternal(bool skipping_saved_key,
                   ikey_.user_key, !pin_thru_lifetime_ ||
                                       !iter_.iter()->IsKeyPinned() /* copy */);
             }
+            saved_seq_ = ikey_.sequence;
 
             if (ikey_.type == kTypeBlobIndex) {
               if (!SetBlobValueIfNeeded(ikey_.user_key, iter_.value())) {
@@ -446,10 +449,12 @@ bool DBIter::FindNextUserEntryInternal(bool skipping_saved_key,
                 return false;
               }
             } else if (ikey_.type == kTypeHeapValueIndex) {
-              if (!SetHeapValue(iter_.value())) {
-                return false;
-              }
-              SetValueAndColumnsFromPlain(heap_value_);
+              // if (!SetHeapValue(iter_.value())) {
+              //   return false;
+              // }
+              // SetValueAndColumnsFromPlain(heap_value_);
+              is_heap_value_ = true;
+              SetValueAndColumnsFromPlain(iter_.value());
             } else {
               assert(ikey_.type == kTypeValue);
               SetValueAndColumnsFromPlain(iter_.value());
@@ -465,6 +470,7 @@ bool DBIter::FindNextUserEntryInternal(bool skipping_saved_key,
             saved_key_.SetUserKey(
                 ikey_.user_key,
                 !pin_thru_lifetime_ || !iter_.iter()->IsKeyPinned() /* copy */);
+            saved_seq_ = ikey_.sequence;
             // By now, we are sure the current ikey is going to yield a value
             current_entry_is_merged_ = true;
             valid_ = true;
@@ -494,6 +500,7 @@ bool DBIter::FindNextUserEntryInternal(bool skipping_saved_key,
         saved_key_.SetUserKey(
             ikey_.user_key,
             !iter_.iter()->IsKeyPinned() || !pin_thru_lifetime_ /* copy */);
+        saved_seq_ = ikey_.sequence;
         skipping_saved_key = false;
         num_skipped = 0;
         reseek_done = false;
@@ -654,21 +661,24 @@ bool DBIter::MergeValuesNewToOld() {
       }
       return true;
     } else if (kTypeHeapValueIndex == ikey.type) {
-      if (!SetHeapValue(iter_.value())) {
-        return false;
-      }
-      valid_ = true;
-      if (!MergeWithPlainBaseValue(heap_value_, ikey_.user_key)) {
-        return false;
-      }
-      ResetHeapValue();
-      // iter_ is positioned after put
-      iter_.Next();
-      if (!iter_.status().ok()) {
-        valid_ = false;
-        return false;
-      }
-      return true;
+      valid_ = false;
+      status_ = Status::NotSupported("heapkv doesn't support merge op");
+      return false;
+      // if (!SetHeapValue(iter_.value())) {
+      //   return false;
+      // }
+      // valid_ = true;
+      // if (!MergeWithPlainBaseValue(heap_value_, ikey_.user_key)) {
+      //   return false;
+      // }
+      // ResetHeapValue();
+      // // iter_ is positioned after put
+      // iter_.Next();
+      // if (!iter_.status().ok()) {
+      //   valid_ = false;
+      //   return false;
+      // }
+      // return true;
     } else if (kTypeWideColumnEntity == ikey.type) {
       if (!MergeWithWideColumnBaseValue(iter_.value(), ikey.user_key)) {
         return false;
@@ -824,7 +834,7 @@ void DBIter::PrevInternal(const Slice* prefix) {
     saved_key_.SetUserKey(
         ExtractUserKey(iter_.key()),
         !iter_.iter()->IsKeyPinned() || !pin_thru_lifetime_ /* copy */);
-
+    saved_seq_ = ikey_.sequence;
     assert(prefix == nullptr || prefix_extractor_ != nullptr);
     if (prefix != nullptr &&
         prefix_extractor_
@@ -957,11 +967,13 @@ bool DBIter::FindValueForCurrentKey() {
       // Since the preceding ParseKey(&ikey) succeeds, so must this.
       assert(ret);
       saved_key_.SetInternalKey(ikey);
+      saved_seq_ = ikey_.sequence;
     } else if (user_comparator_.Compare(ikey.user_key,
                                         saved_key_.GetUserKey()) < 0) {
       saved_key_.SetUserKey(
           ikey.user_key,
           !pin_thru_lifetime_ || !iter_.iter()->IsKeyPinned() /* copy */);
+      saved_seq_ = ikey_.sequence;
     }
 
     valid_entry_seen = true;
@@ -1075,15 +1087,18 @@ bool DBIter::FindValueForCurrentKey() {
 
         return true;
       } else if (last_not_merge_type == kTypeHeapValueIndex) {
-        if (!SetHeapValue(pinned_value_)) {
-          return false;
-        }
-        valid_ = true;
-        if (!MergeWithPlainBaseValue(heap_value_, saved_key_.GetUserKey())) {
-          return false;
-        }
-        ResetHeapValue();
-        return true;
+        valid_ = false;
+        status_ = Status::NotSupported("heapkv doesn't support merge op");
+        return false;
+        // if (!SetHeapValue(pinned_value_)) {
+        //   return false;
+        // }
+        // valid_ = true;
+        // if (!MergeWithPlainBaseValue(heap_value_, saved_key_.GetUserKey())) {
+        //   return false;
+        // }
+        // ResetHeapValue();
+        // return true;
       } else if (last_not_merge_type == kTypeWideColumnEntity) {
         if (!MergeWithWideColumnBaseValue(pinned_value_,
                                           saved_key_.GetUserKey())) {
@@ -1113,10 +1128,11 @@ bool DBIter::FindValueForCurrentKey() {
 
       break;
     case kTypeHeapValueIndex: {
-      if (!SetHeapValue(pinned_value_)) {
-        return false;
-      }
-      SetValueAndColumnsFromPlain(heap_value_);
+      SetValueAndColumnsFromPlain(pinned_value_);
+      // if (!SetHeapValue(pinned_value_)) {
+      //   return false;
+      // }
+      // SetValueAndColumnsFromPlain(heap_value_);
       break;
     }
     case kTypeWideColumnEntity:
@@ -1201,6 +1217,7 @@ bool DBIter::FindValueForCurrentKeyUsingSeek() {
     } else {
       valid_ = true;
       saved_key_.SetInternalKey(ikey);
+      saved_seq_ = ikey_.sequence;
     }
     return true;
   }
@@ -1227,10 +1244,12 @@ bool DBIter::FindValueForCurrentKeyUsingSeek() {
         return false;
       }
     } else if (ikey.type == kTypeHeapValueIndex) {
-      if (!SetHeapValue(pinned_value_)) {
-        return false;
-      }
-      SetValueAndColumnsFromPlain(heap_value_);
+      // if (!SetHeapValue(pinned_value_)) {
+      //   return false;
+      // }
+      // SetValueAndColumnsFromPlain(heap_value_);
+      is_heap_value_ = true;
+      SetValueAndColumnsFromPlain(pinned_value_);
     } else {
       assert(ikey.type == kTypeValue);
       SetValueAndColumnsFromPlain(pinned_value_);
@@ -1238,6 +1257,7 @@ bool DBIter::FindValueForCurrentKeyUsingSeek() {
 
     if (timestamp_lb_ != nullptr) {
       saved_key_.SetInternalKey(ikey);
+      saved_seq_ = ikey_.sequence;
     }
 
     valid_ = true;
@@ -1306,15 +1326,19 @@ bool DBIter::FindValueForCurrentKeyUsingSeek() {
 
       return true;
     } else if (ikey.type == kTypeHeapValueIndex) {
-      if (!SetHeapValue(iter_.value())) {
+      if (!MergeWithPlainBaseValue(iter_.value(), saved_key_.GetUserKey())) {
         return false;
       }
-      valid_ = true;
-      if (!MergeWithPlainBaseValue(heap_value_, saved_key_.GetUserKey())) {
-        return false;
-      }
-      ResetHeapValue();
       return true;
+      // if (!SetHeapValue(iter_.value())) {
+      //   return false;
+      // }
+      // valid_ = true;
+      // if (!MergeWithPlainBaseValue(heap_value_, saved_key_.GetUserKey())) {
+      //   return false;
+      // }
+      // ResetHeapValue();
+      // return true;
     } else if (ikey.type == kTypeWideColumnEntity) {
       if (!MergeWithWideColumnBaseValue(iter_.value(),
                                         saved_key_.GetUserKey())) {
@@ -1800,12 +1824,103 @@ Iterator* NewDBIterator(Env* env, const ReadOptions& read_options,
                         uint64_t max_sequential_skip_in_iterations,
                         ReadCallback* read_callback, DBImpl* db_impl,
                         ColumnFamilyData* cfd, bool expose_blob_index) {
-  DBIter* db_iter =
-      new DBIter(env, read_options, ioptions, mutable_cf_options,
-                 user_key_comparator, internal_iter, version, sequence, false,
-                 max_sequential_skip_in_iterations, read_callback, db_impl, cfd,
-                 expose_blob_index);
-  return db_iter;
+  return new HeapPrefetchDBIter(env, read_options, ioptions, mutable_cf_options,
+                                user_key_comparator, internal_iter, version,
+                                sequence, false,
+                                max_sequential_skip_in_iterations,
+                                read_callback, db_impl, cfd, expose_blob_index);
+}
+
+Slice HeapPrefetchDBIter::key() const {
+  if (!enable_heap_prefetch) {
+    return db_iter_.key();
+  }
+  assert(Valid());
+  return prefetcher_.key();
+}
+
+Slice HeapPrefetchDBIter::value() const {
+  if (!enable_heap_prefetch) {
+    if (db_iter_.IsHeapValue()) {
+      db_iter_.version_->GetHeapValue(ro_, db_iter_.value(), db_iter_.seq(),
+                                      &heap_value_);
+      return heap_value_;
+    } else {
+      return db_iter_.value();
+    }
+  }
+  assert(Valid());
+  return prefetcher_.value();
+}
+
+Slice HeapPrefetchDBIter::timestamp() const {
+  if (!enable_heap_prefetch) {
+    return db_iter_.timestamp();
+  }
+  // heap prefetch doesn't support timestamp
+  return Slice();
+  // assert(Valid());
+  // assert(db_iter_.timestamp_size_ > 0);
+  // if (db_iter_.direction_ == DBIter::kReverse) {
+  //   return db_iter_.saved_timestamp_;
+  // }
+  // const Slice ukey_and_ts = saved_key_.GetUserKey();
+  // assert(timestamp_size_ < ukey_and_ts.size());
+  // return ExtractTimestampFromUserKey(ukey_and_ts, db_iter_.timestamp_size_);
+}
+
+void HeapPrefetchDBIter::Next() {
+  heap_value_.Reset();
+  if (!enable_heap_prefetch) {
+    db_iter_.Next();
+  } else {
+    status_ = prefetcher_.Next();
+  }
+}
+
+void HeapPrefetchDBIter::Prev() {
+  set_valid(false);
+  status_ =
+      Status::NotSupported("HeapPrefetchDBIter doesn't support reverse iter");
+}
+
+void HeapPrefetchDBIter::Seek(const Slice& target) {
+  status_ = Status::OK();
+  heap_value_.Reset();
+  db_iter_.Seek(target);
+  if (enable_heap_prefetch) {
+    status_ = prefetcher_.StartPrefetch();
+  }
+}
+
+void HeapPrefetchDBIter::SeekForPrev(const Slice& target) {
+  status_ = Status::OK();
+  heap_value_.Reset();
+  if (enable_heap_prefetch) {
+    set_valid(false);
+    status_ =
+        Status::NotSupported("HeapPrefetchDBIter doesn't support reverse iter");
+    return;
+  }
+  db_iter_.SeekForPrev(target);
+}
+
+void HeapPrefetchDBIter::SeekToFirst() {
+  status_ = Status::OK();
+  heap_value_.Reset();
+  db_iter_.SeekToFirst();
+  if (enable_heap_prefetch) {
+    status_ = prefetcher_.StartPrefetch();
+  }
+}
+
+void HeapPrefetchDBIter::SeekToLast() {
+  status_ = Status::OK();
+  heap_value_.Reset();
+  db_iter_.SeekToLast();
+  if (enable_heap_prefetch) {
+    prefetcher_.StartPrefetch();
+  }
 }
 
 }  // namespace ROCKSDB_NAMESPACE

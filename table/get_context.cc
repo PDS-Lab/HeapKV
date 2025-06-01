@@ -7,9 +7,9 @@
 
 #include "db/blob//blob_fetcher.h"
 #include "db/dbformat.h"
-#include "db/heap/heap_storage.h"
-#include "db/heap/heap_value_index.h"
 #include "db/heap/io_engine.h"
+#include "db/heap/v2/extent_storage.h"
+#include "db/heap/v2/heap_value_index.h"
 #include "db/merge_helper.h"
 #include "db/pinned_iterators_manager.h"
 #include "db/read_callback.h"
@@ -23,6 +23,7 @@
 #include "rocksdb/statistics.h"
 #include "rocksdb/status.h"
 #include "rocksdb/system_clock.h"
+#include "rocksdb/types.h"
 
 namespace ROCKSDB_NAMESPACE {
 
@@ -36,7 +37,7 @@ GetContext::GetContext(
     SequenceNumber* seq, PinnedIteratorsManager* _pinned_iters_mgr,
     ReadCallback* callback, bool* is_blob_index, bool* is_heap_value_index,
     uint64_t tracing_get_id, BlobFetcher* blob_fetcher,
-    heapkv::CFHeapStorage* heap_storage)
+    heapkv::v2::ExtentStorage* extent_storage)
     : read_options_(ro),
       ucmp_(ucmp),
       merge_operator_(merge_operator),
@@ -60,7 +61,7 @@ GetContext::GetContext(
       is_heap_value_index_(is_heap_value_index),
       tracing_get_id_(tracing_get_id),
       blob_fetcher_(blob_fetcher),
-      heap_storage_(heap_storage) {
+      extent_storage_(extent_storage) {
   if (seq_) {
     *seq_ = kMaxSequenceNumber;
   }
@@ -79,13 +80,13 @@ GetContext::GetContext(const ReadOptions& ro, const Comparator* ucmp,
                        ReadCallback* callback, bool* is_blob_index,
                        bool* is_heap_value_index, uint64_t tracing_get_id,
                        BlobFetcher* blob_fetcher,
-                       heapkv::CFHeapStorage* heap_storage)
+                       heapkv::v2::ExtentStorage* extent_storage)
     : GetContext(ro, ucmp, merge_operator, logger, statistics, init_state,
                  user_key, pinnable_val, columns, /*timestamp=*/nullptr,
                  value_found, merge_context, do_merge,
                  _max_covering_tombstone_seq, clock, seq, _pinned_iters_mgr,
                  callback, is_blob_index, is_heap_value_index, tracing_get_id,
-                 blob_fetcher, heap_storage) {}
+                 blob_fetcher, extent_storage) {}
 
 void GetContext::appendToReplayLog(ValueType type, Slice value, Slice ts) {
   if (replay_log_) {
@@ -384,7 +385,7 @@ bool GetContext::SaveValue(const ParsedInternalKey& parsed_key,
               push_operand(blob_value, nullptr);
             } else if (type == kTypeHeapValueIndex) {
               PinnableSlice pin_val;
-              if (GetHeapValue(value, &pin_val) == false) {
+              if (GetHeapValue(value, parsed_key.sequence, &pin_val) == false) {
                 return false;
               }
               Slice heap_value(pin_val);
@@ -425,7 +426,7 @@ bool GetContext::SaveValue(const ParsedInternalKey& parsed_key,
             }
           } else if (type == kTypeHeapValueIndex) {
             PinnableSlice pin_val;
-            if (GetHeapValue(value, &pin_val) == false) {
+            if (GetHeapValue(value, parsed_key.sequence, &pin_val) == false) {
               return false;
             }
             Slice heap_value(pin_val);
@@ -600,17 +601,12 @@ bool GetContext::GetBlobValue(const Slice& user_key, const Slice& blob_index,
   return true;
 }
 
-bool GetContext::GetHeapValue(const Slice& heap_index,
+bool GetContext::GetHeapValue(const Slice& heap_index, SequenceNumber seq,
                               PinnableSlice* heap_value) {
-  heapkv::HeapValueIndex hvi;
-  Status s = hvi.DecodeFrom(heap_index);
-  if (!s.ok()) {
-    state_ = kCorrupt;
-    return false;
-  }
+  auto hvi = heapkv::v2::HeapValueIndex::DecodeFrom(heap_index);
 
-  s = heap_storage_->GetHeapValue(
-      read_options_, heapkv::GetThreadLocalIoEngine(), hvi, heap_value);
+  Status s = extent_storage_->GetHeapValue(
+      read_options_, heapkv::GetThreadLocalIoEngine(), hvi, seq, heap_value);
   if (!s.ok()) {
     if (s.IsIncomplete()) {
       MarkKeyMayExist();

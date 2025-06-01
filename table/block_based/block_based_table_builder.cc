@@ -460,7 +460,7 @@ struct BlockBasedTableBuilder::Rep {
                        ? BlockBasedTableOptions::kDataBlockBinarySearch
                        : table_options.data_block_index_type,
                    table_options.data_block_hash_table_util_ratio, ts_sz,
-                   persist_user_defined_timestamps, false, true),
+                   persist_user_defined_timestamps),
         range_del_block(
             1 /* block_restart_interval */, true /* use_delta_encoding */,
             false /* use_value_delta_encoding */,

@@ -13,7 +13,8 @@
 
 #include "db/db_impl/db_impl.h"
 #include "db/event_helpers.h"
-#include "db/heap/heap_storage.h"
+#include "db/heap/v2/heap_garbage_collector.h"
+#include "db/heap/v2/heap_job_center.h"
 #include "db/memtable_list.h"
 #include "file/file_util.h"
 #include "file/filename.h"
@@ -397,29 +398,22 @@ void DBImpl::DeleteObsoleteFileImpl(int job_id, const std::string& fname,
         &event_logger_, job_id, number, fname, file_deletion_status, GetName(),
         immutable_db_options_.listeners);
     // TODO(wnj): maybe use eventlistener and dont use db mutex.
-    mutex_.Lock();
-    // we dont know which column family the file belongs to
-    auto cfs = versions_->GetColumnFamilySet();
-    for (auto cfd : *cfs) {
-      if (cfd->IsDropped()) {
-        continue;
-      }
-      if (cfd->heap_storage()) {
-        auto job = cfd->heap_storage()->NotifyFileDeletion(number);
-        if (job != nullptr) {
-          auto arg = new heapkv::CFHeapStorage::HeapGCArg{
-              .db_ = this,
-              .shutting_down_ = &shutting_down_,
-              .cfd_ = cfd,
-              .storage_ = cfd->heap_storage(),
-              .job_ = std::move(job),
-              .force_gc_ = false};
-          env_->Schedule(&BGWorkHeapGCJob, arg);
-          bg_heap_gc_scheduled_++;
-        }
-      }
-    }
-    mutex_.Unlock();
+    default_cf_handle_->cfd()->heap_job_center()->NotifyFileDeletion(number);
+    default_cf_handle_->cfd()->heap_job_center()->MaybeScheduleGc();
+    // autovector<heapkv::v2::HeapJobCenter*> jcs;
+    // mutex_.Lock();
+    // // we dont know which column family the file belongs to
+    // auto cfs = versions_->GetColumnFamilySet();
+    // for (auto cfd : *cfs) {
+    //   if (!cfd->IsDropped() && cfd->heap_job_center() != nullptr) {
+    //     jcs.push_back(cfd->heap_job_center());
+    //   }
+    // }
+    // mutex_.Unlock();
+    // for (auto jc : jcs) {
+    //   jc->NotifyFileDeletion(number);
+    //   jc->MaybeScheduleGc();
+    // }
   }
   if (type == kBlobFile) {
     EventHelpers::LogAndNotifyBlobFileDeletion(

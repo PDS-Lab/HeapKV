@@ -24,6 +24,9 @@ class SystemClock;
 struct ParsedInternalKey;
 namespace heapkv {
 class CFHeapStorage;
+namespace v2 {
+class ExtentStorage;
+}
 }
 
 // Data structure for accumulating statistics during a point lookup. At the
@@ -116,7 +119,7 @@ class GetContext {
              ReadCallback* callback = nullptr, bool* is_blob_index = nullptr,
              bool* is_heap_value_index = nullptr, uint64_t tracing_get_id = 0,
              BlobFetcher* blob_fetcher = nullptr,
-             heapkv::CFHeapStorage* heap_storage = nullptr);
+             heapkv::v2::ExtentStorage* extent_storage = nullptr);
   GetContext(const ReadOptions& ro, const Comparator* ucmp,
              const MergeOperator* merge_operator, Logger* logger,
              Statistics* statistics, GetState init_state, const Slice& user_key,
@@ -129,7 +132,7 @@ class GetContext {
              ReadCallback* callback = nullptr, bool* is_blob_index = nullptr,
              bool* is_heap_value_index = nullptr, uint64_t tracing_get_id = 0,
              BlobFetcher* blob_fetcher = nullptr,
-             heapkv::CFHeapStorage* heap_storage = nullptr);
+             heapkv::v2::ExtentStorage* extent_storage = nullptr);
 
   GetContext() = delete;
 
@@ -216,7 +219,8 @@ class GetContext {
 
   bool GetBlobValue(const Slice& user_key, const Slice& blob_index,
                     PinnableSlice* blob_value);
-  bool GetHeapValue(const Slice& heap_value_index, PinnableSlice* heap_value);
+  bool GetHeapValue(const Slice& heap_value_index, SequenceNumber seq,
+                    PinnableSlice* heap_value);
 
   void appendToReplayLog(ValueType type, Slice value, Slice ts);
 
@@ -259,7 +263,7 @@ class GetContext {
   // Get or a MultiGet.
   const uint64_t tracing_get_id_;
   BlobFetcher* blob_fetcher_;
-  heapkv::CFHeapStorage* heap_storage_;
+  heapkv::v2::ExtentStorage* extent_storage_;
 };
 
 // Call this to replay a log and bring the get_context up to date. The replay

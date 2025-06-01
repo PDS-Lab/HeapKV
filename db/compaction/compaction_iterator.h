@@ -6,14 +6,16 @@
 
 #include <algorithm>
 #include <cinttypes>
+#include <cstdint>
 #include <deque>
 #include <string>
+#include <unordered_map>
 #include <unordered_set>
 #include <vector>
 
 #include "db/compaction/compaction.h"
 #include "db/compaction/compaction_iteration_stats.h"
-#include "db/heap/heap_alloc_job.h"
+#include "db/heap/v2/heap_alloc_job.h"
 #include "db/merge_helper.h"
 #include "db/pinned_iterators_manager.h"
 #include "db/range_del_aggregator.h"
@@ -208,8 +210,9 @@ class CompactionIterator {
       SequenceNumber job_snapshot, const SnapshotChecker* snapshot_checker,
       Env* env, bool report_detailed_time, bool expect_valid_internal_key,
       CompactionRangeDelAggregator* range_del_agg,
-      BlobFileBuilder* blob_file_builder, heapkv::HeapAllocJob* heap_alloc_job,
-      bool allow_data_in_errors, bool enforce_single_del_contracts,
+      BlobFileBuilder* blob_file_builder,
+      heapkv::v2::HeapAllocJob* heap_alloc_job, bool allow_data_in_errors,
+      bool enforce_single_del_contracts,
       const std::atomic<bool>& manual_compaction_canceled,
       bool must_count_input_entries, const Compaction* compaction = nullptr,
       const CompactionFilter* compaction_filter = nullptr,
@@ -227,8 +230,9 @@ class CompactionIterator {
       SequenceNumber job_snapshot, const SnapshotChecker* snapshot_checker,
       Env* env, bool report_detailed_time, bool expect_valid_internal_key,
       CompactionRangeDelAggregator* range_del_agg,
-      BlobFileBuilder* blob_file_builder, heapkv::HeapAllocJob* heap_alloc_job,
-      bool allow_data_in_errors, bool enforce_single_del_contracts,
+      BlobFileBuilder* blob_file_builder,
+      heapkv::v2::HeapAllocJob* heap_alloc_job, bool allow_data_in_errors,
+      bool enforce_single_del_contracts,
       const std::atomic<bool>& manual_compaction_canceled,
       std::unique_ptr<CompactionProxy> compaction,
       bool must_count_input_entries,
@@ -313,6 +317,10 @@ class CompactionIterator {
   // Return true on success, false on failures (e.g.: kIOError).
   bool InvokeFilterIfNeeded(bool* need_skip, Slice* skip_until);
 
+  // Check whether file_epoch in HeapValueIndex matched with current file epoch.
+  // If not, update file_epoch and ValueAddr
+  bool ReplaceValueAddrIfNeeded();
+
   // Given a sequence number, return the sequence number of the
   // earliest snapshot that this sequence number is visible in.
   // The snapshots themselves are arranged in ascending order of
@@ -372,7 +380,7 @@ class CompactionIterator {
   const bool expect_valid_internal_key_;
   CompactionRangeDelAggregator* range_del_agg_;
   BlobFileBuilder* blob_file_builder_;
-  heapkv::HeapAllocJob* heap_alloc_job_;
+  heapkv::v2::HeapAllocJob* heap_alloc_job_;
   std::unique_ptr<CompactionProxy> compaction_;
   const CompactionFilter* compaction_filter_;
   const std::atomic<bool>* shutting_down_;

@@ -15,7 +15,7 @@
 #include "db/db_impl/db_impl.h"
 #include "db/error_handler.h"
 #include "db/event_helpers.h"
-#include "db/heap/heap_storage.h"
+#include "db/heap/v2/heap_job_center.h"
 #include "file/sst_file_manager_impl.h"
 #include "logging/logging.h"
 #include "monitoring/iostats_context_imp.h"
@@ -25,6 +25,7 @@
 #include "rocksdb/file_system.h"
 #include "rocksdb/io_status.h"
 #include "rocksdb/options.h"
+#include "rocksdb/status.h"
 #include "rocksdb/table.h"
 #include "test_util/sync_point.h"
 #include "util/cast_util.h"
@@ -3087,45 +3088,6 @@ void DBImpl::BGWorkPurge(void* db) {
   TEST_SYNC_POINT("DBImpl::BGWorkPurge:end");
 }
 
-void DBImpl::BGWorkHeapGCJob(void* arg) {
-  auto heap_free_arg = reinterpret_cast<heapkv::CFHeapStorage::HeapGCArg*>(arg);
-  auto extent_manager = heap_free_arg->storage_->extent_manager();
-  if (heap_free_arg->job_) {
-    extent_manager->SubmitGarbage(heap_free_arg->job_->garbage_);
-  }
-
-  while (extent_manager->NeedScheduleGC() &&
-         !heap_free_arg->shutting_down_->load(std::memory_order_acquire)) {
-    auto j = heap_free_arg->storage_->NewGCJob(false);
-    if (!j) {
-      break;
-    }
-    Status s = j->Run();
-    if (!s.ok()) {
-      // log error
-      ROCKS_LOG_ERROR(heap_free_arg->cfd_->ioptions()->info_log,
-                      "Failed to execute heap free job: %s",
-                      s.ToString().c_str());
-    }
-  }
-  if (heap_free_arg->force_gc_) {
-    // TODO(wnj): force gc all garbage
-    Status s = heap_free_arg->storage_->NewGCJob(true)->Run();
-    if (!s.ok()) {
-      // log error
-      ROCKS_LOG_ERROR(heap_free_arg->cfd_->ioptions()->info_log,
-                      "Failed to execute heap free job: %s",
-                      s.ToString().c_str());
-    }
-  }
-
-  heap_free_arg->db_->mutex_.Lock();
-  heap_free_arg->db_->bg_heap_gc_scheduled_--;
-  heap_free_arg->db_->bg_cv_.SignalAll();
-  heap_free_arg->db_->mutex_.Unlock();
-  delete heap_free_arg;
-}
-
 void DBImpl::UnscheduleCompactionCallback(void* arg) {
   CompactionArg* ca_ptr = reinterpret_cast<CompactionArg*>(arg);
   Env::Priority compaction_pri = ca_ptr->compaction_pri_;
@@ -3852,8 +3814,7 @@ Status DBImpl::BackgroundCompaction(bool* made_progress,
                                                              moved_bytes);
     {
       event_logger_.LogToBuffer(log_buffer)
-          << "job" << job_context->job_id << "event"
-          << "trivial_move"
+          << "job" << job_context->job_id << "event" << "trivial_move"
           << "destination_level" << c->output_level() << "files" << moved_files
           << "total_files_size" << moved_bytes;
     }
@@ -4406,6 +4367,33 @@ Status DBImpl::WaitForCompact(
       return error_handler_.GetBGError();
     }
   }
+}
+
+Status DBImpl::WaitForHeapGc() {
+  Status s;
+  WaitForCompactOptions wo;
+  wo.flush = true;
+  s = WaitForCompact(wo);
+  if (!s.ok()) {
+    return s;
+  }
+
+  autovector<heapkv::v2::HeapJobCenter*> jcs;
+  {
+    InstrumentedMutexLock l(&mutex_);
+    for (auto cfd : *versions_->GetColumnFamilySet()) {
+      if (cfd->heap_job_center()) {
+        jcs.push_back(cfd->heap_job_center());
+      }
+    }
+  }
+  for (auto jc : jcs) {
+    jc->PurgeAllGarbage();
+  }
+  for (auto jc : jcs) {
+    jc->WaitJobDone();
+  }
+  return s;
 }
 
 }  // namespace ROCKSDB_NAMESPACE

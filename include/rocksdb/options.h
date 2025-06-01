@@ -1757,6 +1757,8 @@ struct ReadOptions {
   // Default: true
   bool auto_readahead_size = true;
 
+  bool enable_heap_prefetch = true;
+
   // *** END options only relevant to iterators or scans ***
 
   // *** BEGIN options for RocksDB internal use only ***

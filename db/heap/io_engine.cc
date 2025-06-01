@@ -102,14 +102,17 @@ void UringIoEngine::SubmitIo(const UringIoOptions opts, UringCmdHandle* handle,
                              io_uring_sqe* sqe) {
   io_uring_sqe_set_data(sqe, handle);
   io_uring_sqe_set_flags(sqe, opts.flags_);
-  int ret = io_uring_submit(&ring_);
-  if (UNLIKELY(ret < 0)) {
-    std::cerr << "io_uring_submit failed: " << ret << " " << strerror(-ret)
-              << std::endl;
-    handle->future->SetResult(ret, 0);
-    FreeHandle(handle);
+  int rc = 0;
+  if (!opts.LinkedReq()) {
+    rc = io_uring_submit(&ring_);
+    if (UNLIKELY(rc < 0)) {
+      std::cerr << "io_uring_submit failed: " << rc << " " << strerror(-rc)
+                << std::endl;
+      handle->future->SetResult(rc, 0);
+      FreeHandle(handle);
+    }
   }
-  if (ret >= 0) {
+  if (rc >= 0) {
     inflight_++;
   }
 }
