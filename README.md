@@ -30,10 +30,11 @@ RocksDB is dual-licensed under both the GPLv2 (found in the COPYING file in the 
 
 ## HeapKV: Enabling Efficient Garbage Collection for KV-Separated LSM Stores on Modern SSDs
 
+<!--
 ### Introduction
 
 Key-value (KV) separation has emerged as a pivotal solution to tackle write amplification in LSM-tree-based KV stores (LSM stores). However, the garbage collection (GC) mechanism essential for reclaiming obsolete values introduces substantial overheads: (i) Additional LSM-tree I/O operations degrade foreground performance and cause data inconsistency issues; (ii) Exacerbated write amplification arises from excessive valid data migration in update-intensive workloads. Moreover, existing GC optimization schemes fundamentally struggle to balance space overhead, write amplification, and system performance. We propose HeapKV, a high-performance KV separated LSM store that improves GC efficiency through three key technologies: (i) A lightweight two-level index and a global garbage view decouple GC operations of value storage from the LSM-tree, eliminating additional I/O operations; (ii) A novel valid data migration scheme mitigates write amplification during space reclamation by in-place overwrites and logical data copying; (iii) SSD-conscious I/O optimizations featuring asynchronous value flushing, fast read paths and concurrent prefetching for range queries.
-
+-->
 ### Overview
 
 This repository contains a naive prototype of HeapKV that written in C++ based on [RocksDB](https://github.com/facebook/rocksdb) v8.11.3 . The core implementation of HeapKV is under `db/heap` directory.
